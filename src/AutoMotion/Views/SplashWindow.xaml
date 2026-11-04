@@ -1,0 +1,47 @@
+<Window x:Class="AutoMotion.Views.SplashWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:AutoMotion.Utilities"
+        Title="AutoMotion"
+        Width="380" Height="430"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        Topmost="True"
+        ShowInTaskbar="False"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterScreen">
+    <Border Name="RootBorder" Background="#E0001F5B" BorderThickness="4" BorderBrush="#000000" Padding="0">
+        <Border.Effect>
+            <DropShadowEffect Color="#000000" BlurRadius="0" ShadowDepth="6" Opacity="0.7"/>
+        </Border.Effect>
+        <Grid Margin="20">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- Logo: alttaki tam renkli logo sabit, üstündeki sonsuzluk-işareti-özel altın dolgu
+                 katmanı soldan sağa akan bir Clip animasyonuyla açığa çıkar - "yükleniyor" hissi
+                 verecek şekilde sonsuzluk sembolünün üstüne altın rengin "dolması" efekti. -->
+            <Grid Grid.Row="0" Width="320" Height="320" HorizontalAlignment="Center" VerticalAlignment="Center">
+                <Image Source="/Assets/logo.png" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality"/>
+                <Image x:Name="InfinityFillImage" Source="/Assets/logo_infinity_fill.png" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality">
+                    <Image.Clip>
+                        <RectangleGeometry x:Name="FillClip" Rect="0,0,0,320"/>
+                    </Image.Clip>
+                    <Image.Effect>
+                        <DropShadowEffect x:Name="FillGlow" Color="#FBCA1F" BlurRadius="0" ShadowDepth="0" Opacity="0"/>
+                    </Image.Effect>
+                </Image>
+            </Grid>
+
+            <TextBlock Grid.Row="1" Text="{loc:Translate ui.splash.automotion}" FontFamily="{StaticResource PixelFont}" FontSize="16"
+                       Foreground="#FFFFFF" HorizontalAlignment="Center" Margin="0,14,0,8"/>
+
+            <TextBlock Grid.Row="2" Name="StatusText" Text="{loc:Translate ui.splash.yukleniyor}" FontFamily="{StaticResource PixelFont}" FontSize="8"
+                       Foreground="#8A96A3" HorizontalAlignment="Center" Margin="0,0,0,4"/>
+        </Grid>
+    </Border>
+</Window>

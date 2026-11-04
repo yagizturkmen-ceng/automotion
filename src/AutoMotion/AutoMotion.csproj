@@ -1,0 +1,97 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <!-- Kod tabanı hiçbir yerde nullable-annotation (?, !) kullanmadan yazıldığından (klasik/
+         null-safety-öncesi stil - alanlar constructor/InitializeVehicleStats içinde atanıyor, WPF
+         designer alanları vb.), "enable" yalnızca ~600 gürültülü CS86xx uyarısı üretiyordu, gerçek
+         bir null-referans hatasını yakaladığı için değil. Kod stiline uyan "disable" ile bu uyarılar
+         kaynağında ortadan kaldırıldı. -->
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <ApplicationIcon>Assets\logo.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <!-- YAYIN AYARLARI - yalnızca `dotnet publish` sırasında geçerli (_IsPublishing).
+       Normal derleme/test yolunu değiştirmezler; RuntimeIdentifier'ı proje geneline koymak çıktı
+       klasörünü kaydırıp test projesinin beklentilerini bozardı.
+
+       NEDEN BURADA: bu ayarlar eskiden yalnızca elle verilen CLI bayraklarında yaşıyordu. Düz
+       `dotnet publish` çalıştıran biri, ".NET 9 gerekmiyor" iddiasının aksine ÇERÇEVEYE BAĞIMLI bir
+       paket üretiyordu - temiz bir makinede "You must install .NET" hatasıyla açılmayan bir yayın.
+       Artık iddia projede sabit: paket .NET çalışma zamanını kendi içinde taşır. -->
+  <PropertyGroup Condition="'$(_IsPublishing)' == 'true'">
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <!-- Steam'e yüklenen klasör; tek dosya paketleme BİLEREK kapalı: araç görselleri, dil dosyaları
+         ve steam_api64.dll zaten exe'nin yanından okunuyor (bkz. aşağıdaki Content öğeleri). -->
+    <PublishSingleFile>false</PublishSingleFile>
+    <!-- Kırpma (trimming) kapalı: WPF + XAML yansıma (reflection) ile tip çözdüğünden kırpılmış
+         paket çalışma zamanında beklenmedik şekilde patlayabilir. -->
+    <PublishTrimmed>false</PublishTrimmed>
+    <DebugType>none</DebugType> <!-- yayın paketinde *.pdb olmasın (bkz. kalan işler listesi) -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\logo.png" />
+    <Resource Include="Assets\logo.ico" />
+    <!-- Açılış ekranındaki "dolum" animasyonu için: logo.png'deki sonsuzluk sembolünün konumunu
+         birebir eşleyen, sadece o şekli içeren ayrı bir katman (bkz. Views/SplashWindow.xaml). -->
+    <Resource Include="Assets\logo_infinity_fill.png" />
+  </ItemGroup>
+
+  <!-- Araç görselleri BİLEREK gömülü Resource DEĞİL, gevşek Content dosyası olarak kopyalanır -
+       kullanıcı bu PNG'leri (Photoshop/Affinity ile) sık sık güncelliyor; Resource olsaydı her
+       değişiklik derlemeye gömülene kadar görünmezdi, Content olunca sadece dosya + uygulamanın
+       yeniden başlatılması yeterli oluyor (bkz. MainWindow.GetVehicleBitmap - artık pack:// yerine
+       exe'nin yanındaki gerçek dosya yolundan okuyor). -->
+  <ItemGroup>
+    <Content Include="Assets\Vehicles\**\*.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\Fonts\*.ttf" />
+  </ItemGroup>
+
+  <!-- Dil dosyaları da araç görselleri gibi BİLEREK gömülü kaynak değil, gevşek Content: bir çeviri
+       düzeltmesi ya da yeni bir dil eklemek için yeniden derleme gerekmesin (bkz. Services/Localization.cs). -->
+  <ItemGroup>
+    <Content Include="Assets\Lang\*.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <!-- GELİŞTİRME dosyası: Steam'e, oyun Steam istemcisi üzerinden başlatılmasa bile hangi
+       uygulamanın çalıştığını söyler. Şu anki değer 480 = Valve'ın açık test uygulaması
+       "Spacewar"; gerçek App ID alınınca burası ve SteamService.AppId güncellenecek.
+
+       ⚠️ YAYIN PAKETİNE DAHİL EDİLMEMELİ - Steam üzerinden başlatılan sürümde bu dosyanın
+       varlığı sahiplik kontrolünü atlatabilir. Depoya yükleme adımında hariç tutulmalı. -->
+  <ItemGroup>
+    <Content Include="steam_appid.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <!-- Geliştirme çıktısına kopyalanır ama YAYIN paketine ASLA girmez. Eskiden bu yalnızca
+           yukarıdaki uyarı yorumuyla korunuyordu, yani "unutulabilir" bir kuraldı; artık derleme
+           sistemi zorluyor. -->
+      <CopyToPublishDirectory>Never</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
+  <!-- Sistem tepsisi simgesi (NotifyIcon) için WinForms/Drawing derlemelerine doğrudan referans.
+       UseWindowsForms=true KULLANILMAZ çünkü ImplicitUsings ile birlikte System.Windows.Forms ve
+       System.Drawing için otomatik global using ekleyip WPF'nin Point/Size/Color/Brush/Rectangle/
+       Application/MouseEventArgs/KeyEventArgs tipleriyle belirsizlik (CS0104) çakışması yaratıyor. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App.WindowsForms" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="MQTTnet" Version="4.3.3.952" />
+    <PackageReference Include="NAudio" Version="2.2.1" />
+    <PackageReference Include="Steamworks.NET" Version="2024.8.0" />
+  </ItemGroup>
+
+</Project>

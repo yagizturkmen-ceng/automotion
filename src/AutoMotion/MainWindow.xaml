@@ -1,0 +1,1231 @@
+<Window x:Class="AutoMotion.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:AutoMotion"
+        xmlns:loc="clr-namespace:AutoMotion.Utilities"
+        mc:Ignorable="d"
+        Title="AutoMotion - Virtual Vehicle Simulator"
+        Icon="Assets/logo.ico"
+        WindowStartupLocation="Manual"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        Topmost="True"
+        ShowInTaskbar="True"
+        Foreground="#FFFFFF"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
+        TextOptions.TextFormattingMode="Display"
+        TextOptions.TextRenderingMode="ClearType"
+        TextOptions.TextHintingMode="Fixed"
+        RenderOptions.ClearTypeHint="Enabled"
+        RenderOptions.BitmapScalingMode="HighQuality"
+        Loaded="Window_Loaded"
+        Closed="Window_Closed"
+        KeyDown="Window_KeyDown"
+        KeyUp="Window_KeyUp"
+        AllowDrop="True"
+        DragEnter="Window_DragEnter"
+        Drop="Window_Drop">
+
+    <Grid UseLayoutRounding="True" SnapsToDevicePixels="True" TextElement.FontFamily="{StaticResource PixelFont}">
+        <!-- Arka plan ızgarası: eskiden her karede ~60 ayrı Line nesnesi olarak yeniden çiziliyordu
+             (144 FPS'te saniyede ~8600 nesne!). Izgara aslında sabit olduğundan artık tek bir
+             döşemeli (tiled) fırçayla tek bir dikdörtgen olarak çiziliyor - tema değişmedikçe hiç
+             yeniden oluşturulmuyor. -->
+        <!-- TEMA ÇAPRAZ GEÇİŞİ: tema değişince renk anında sıçramasın diye iki katman kullanılıyor.
+             ThemeLayer YENİ temayı gösterir; ThemeFadeLayer ESKİ temayı taşır ve opaklığı sıfıra
+             rampalanır (bkz. MainWindow.Rendering UpdateThemeTransition). Temalar düz renk ve
+             gradyan karışımı olduğundan araları interpolasyonla geçilemiyordu - çapraz solma her
+             fırça tipiyle çalışır. Arka plan eskiden RenderCanvas.Background'daydı; orada solma
+             yapılamazdı çünkü opaklık sahnedeki her şeyi birlikte soldururdu. -->
+        <Rectangle Name="ThemeLayer" IsHitTestVisible="False"/>
+        <Rectangle Name="ThemeFadeLayer" IsHitTestVisible="False" Opacity="0"/>
+
+        <Rectangle Name="GridLayer" IsHitTestVisible="False"/>
+
+        <!-- Gündüz/gece koyulaşması da sabit bir katman: saatle çok yavaş değiştiğinden her karede
+             yeniden oluşturulması gereksizdi. -->
+        <Rectangle Name="NightLayer" IsHitTestVisible="False"/>
+
+        <!-- Main Canvas - TAMAMEN ŞEFFAF, masaüstü buradan görünür -->
+        <Canvas Name="RenderCanvas" Background="Transparent" MouseDown="Canvas_MouseDown" MouseMove="Canvas_MouseMove" MouseUp="Canvas_MouseUp" MouseRightButtonDown="Canvas_RightMouseDown" LostMouseCapture="RenderCanvas_LostMouseCapture" MouseWheel="Canvas_MouseWheel">
+            <Canvas.Resources>
+                <!-- Sahne katmanı, uygulama genelindeki garanti satır yüksekliği kuralının DIŞINDA
+                     (bkz. Styles.xaml). Buradaki metinler akış düzeninde değil; araç emojileri,
+                     parçacıklar ve baloncuklar her karede Canvas.Left/Top ile piksel hassasiyetinde
+                     yerleştiriliyor. Satır kutusunu büyütmek onları aşağı kaydırır, üstelik satır
+                     bindirmesi sorunu burada zaten yok (tek satırlık, çoğu emoji fontuyla çizilen
+                     metinler). Boş örtük stil = "bu alt ağaçta varsayılan davranışa dön". -->
+                <Style TargetType="TextBlock"/>
+            </Canvas.Resources>
+
+            <!-- Sahne katmanı: kare döngüsünün çizdiği HER ŞEY buraya girer ve kareler arasında
+                 KORUNUR (bkz. Utilities/RetainedScene.cs). Ayrı bir alt kanvas olmasının sebebi,
+                 sahne dışında eklenen öğelerin (seçim kutusu, kalp animasyonu, kargo kamyonu)
+                 kare kırpmasından etkilenmemesi - eskiden her karedeki Children.Clear() onları da
+                 siliyordu. Bunlar RenderCanvas'ın doğrudan çocuğu kalır, yani sahnenin üstünde. -->
+            <Canvas Name="SceneLayer"/>
+        </Canvas>
+
+        <!-- Yüzer Kontrol Dock'u - ekranın üst ortasında, sürüklenebilir, kendi içine katlanabilir -->
+        <StackPanel Name="DockWrapper" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,10,0,0">
+            <Border Name="DockBorder" Background="{StaticResource NavyPanelGradient}" CornerRadius="0" BorderThickness="4" BorderBrush="{StaticResource TextBlackBrush}" Padding="6,5"
+                    MouseLeftButtonDown="TopBar_MouseLeftButtonDown" Opacity="0" RenderTransformOrigin="0.5,0.5">
+                <Border.RenderTransform>
+                    <TranslateTransform x:Name="DockSlideTransform" Y="-30"/>
+                </Border.RenderTransform>
+                <Border.Effect>
+                    <DropShadowEffect x:Name="DockGlow" BlurRadius="0" ShadowDepth="4" Opacity="1" Color="#000000"/>
+                </Border.Effect>
+                <Border.Triggers>
+                    <EventTrigger RoutedEvent="Loaded">
+                        <BeginStoryboard>
+                            <Storyboard>
+                                <DoubleAnimation Storyboard.TargetProperty="Opacity" From="0" To="1" Duration="0:0:0.5">
+                                    <DoubleAnimation.EasingFunction>
+                                        <QuadraticEase EasingMode="EaseOut"/>
+                                    </DoubleAnimation.EasingFunction>
+                                </DoubleAnimation>
+                                <DoubleAnimation Storyboard.TargetName="DockSlideTransform" Storyboard.TargetProperty="Y" From="-30" To="0" Duration="0:0:0.5">
+                                    <DoubleAnimation.EasingFunction>
+                                        <BackEase EasingMode="EaseOut" Amplitude="0.4"/>
+                                    </DoubleAnimation.EasingFunction>
+                                </DoubleAnimation>
+                                <!-- KALDIRILDI: DockGlow.ShadowDepth üzerinde AutoReverse+RepeatBehavior="Forever"
+                                     ile sonsuz bir "nabız" animasyonu vardı. Ölçüldü: bu tek dekoratif
+                                     animasyon boşta bir CPU çekirdeğinin ~%44'ünü yakıyordu.
+
+                                     Neden bu kadar pahalı: (1) "Forever" bir animasyon WPF'in render
+                                     thread'ini SONSUZA KADAR ekran yenileme hızında tetikte tutar -
+                                     kompozisyon hiç boşa düşemez; (2) animasyon bir DropShadowEffect
+                                     özelliğini değiştirdiği için her karede efektin yeniden
+                                     hesaplanması gerekir; (3) pencere AllowsTransparency="True" ve tam
+                                     ekran olduğundan, her kare 1920x1080'lik per-piksel-alfa katmanlı
+                                     yüzeyin komple yeniden blit edilmesi demektir.
+
+                                     Masaüstünde sürekli açık kalan bir uygulamada bu, fark edilmeyen
+                                     bir gölge titreşimi için kabul edilemez bir bedel. Dock'un GİRİŞ
+                                     animasyonu (yukarıdaki fade + slide) korundu: o sonlu, bir kez
+                                     çalışıp biter ve render thread'i serbest bırakır. -->
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </EventTrigger>
+                </Border.Triggers>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="🚗" FontSize="15" VerticalAlignment="Center" Margin="8,0,6,0" IsHitTestVisible="False"/>
+
+                    <!-- Katlanabilir ikon grubu -->
+                    <StackPanel Name="DockIcons" Orientation="Horizontal">
+                        <Button Name="ThemeBtn" Content="🎨" Click="ThemeBtn_Click" Style="{StaticResource IconButton}" ToolTip="{loc:Translate ui.tema_degistir_t}" AutomationProperties.Name="{loc:Translate ui.tema_degistir_t}"/>
+                        <Button Name="SoundBtn" Content="🔊" Click="SoundBtn_Click" Style="{StaticResource IconButton}" ToolTip="{loc:Translate ui.ses_ac_kapa_m}" AutomationProperties.Name="{loc:Translate ui.ses_ac_kapa_m}"/>
+                        <Button Name="NightModeBtn" Content="🌙" Click="NightModeBtn_Click" Style="{StaticResource IconButton}" ToolTip="{loc:Translate ui.gece_modu_otomatik}" AutomationProperties.Name="{loc:Translate ui.gece_modu_otomatik}"/>
+                        <Button Name="MusicSyncBtn" Content="🎵" Click="MusicSyncBtn_Click" Style="{StaticResource IconButton}" ToolTip="{loc:Translate ui.muzik_suspansiyon_senkronu_acik}" AutomationProperties.Name="{loc:Translate ui.muzik_suspansiyon_senkronu_acik}"/>
+                        <Button Name="EffectsDensityBtn" Content="🎆" Click="EffectsDensityBtn_Click" Style="{StaticResource IconButton}" ToolTip="{loc:Translate ui.efekt_yogunlugu_normal}" AutomationProperties.Name="{loc:Translate ui.efekt_yogunlugu_normal}"/>
+                        <Button Name="DirtEffectBtn" Content="🟤" Opacity="0.4" Click="DirtEffectBtn_Click" Style="{StaticResource IconButton}" ToolTip="{loc:Translate ui.kirlenme_efekti_kapali}" AutomationProperties.Name="{loc:Translate ui.kirlenme_efekti_kapali}"/>
+
+                        <Rectangle Width="2" Fill="#000000" Margin="4,7"/>
+
+                        <Button Name="SaveBtn" Content="💾" Click="SaveBtn_Click" Style="{StaticResource IconButton}" ToolTip="{loc:Translate ui.kaydet_ctrls}" AutomationProperties.Name="{loc:Translate ui.kaydet_ctrls}"/>
+                        <Button Name="LoadBtn" Content="📂" Click="LoadBtn_Click" Style="{StaticResource IconButton}" ToolTip="{loc:Translate ui.yukle_l}" AutomationProperties.Name="{loc:Translate ui.yukle_l}"/>
+
+                        <Rectangle Width="2" Fill="#000000" Margin="4,7"/>
+
+                        <Button Name="AddVehicleDockBtn" Content="➕" Click="AddVehicleBtn_Click" Style="{StaticResource IconButton}" ToolTip="{loc:Translate ui.arac_ekle_r}" AutomationProperties.Name="{loc:Translate ui.arac_ekle_r}"/>
+                        <Button Name="ClearDockBtn" Content="🗑️" Click="ClearBtn_Click" Style="{StaticResource IconButton}" ToolTip="{loc:Translate ui.temizle_c}" AutomationProperties.Name="{loc:Translate ui.temizle_c}"/>
+                        <Button Name="CallVehicleDockBtn" Content="📍" Click="CallVehicleBtn_Click" Style="{StaticResource IconButton}" ToolTip="{loc:Translate ui.secili_araci_imlece_cagir_q}" AutomationProperties.Name="{loc:Translate ui.secili_araci_imlece_cagir_q}"/>
+
+                        <Rectangle Width="2" Fill="#000000" Margin="4,7"/>
+
+                        <Button Name="ExpansionsBtn" Content="🧩" Click="ExpansionsBtn_Click" Style="{StaticResource IconButton}" ToolTip="{loc:Translate ui.eklentiler_e}" AutomationProperties.Name="{loc:Translate ui.eklentiler_e}"/>
+                        <Button Name="MultiMonitorBtn" Content="🖥️" Click="ToggleMultiMonitor_Click" Style="{StaticResource IconButton}" ToolTip="{loc:Translate ui.coklu_monitor_gezinme_ac_kapat}" AutomationProperties.Name="{loc:Translate ui.coklu_monitor_gezinme_ac_kapat}"/>
+                        <Button Name="MiniHudBtn" Content="📟" Click="ToggleMiniHud_Click" Style="{StaticResource IconButton}" ToolTip="{loc:Translate ui.mini_hud_widget_i_ac_kapat}" AutomationProperties.Name="{loc:Translate ui.mini_hud_widget_i_ac_kapat}"/>
+                        <Button Name="AutoMoveBtn" Content="🤖" Click="ToggleAutoMove_Click" Style="{StaticResource IconButton}" ToolTip="{loc:Translate ui.otomatik_hareket_ac_kapat_a}" AutomationProperties.Name="{loc:Translate ui.otomatik_hareket_ac_kapat_a}"/>
+                        <Button Name="ShortcutsBtn" Content="⌨️🔓" Click="ToggleShortcutsBtn_Click" Style="{StaticResource IconButton}" ToolTip="{loc:Translate ui.klavye_kisayollari_acik_yazarken_kapatmak_icin}" AutomationProperties.Name="{loc:Translate ui.klavye_kisayollarini_ac_kapat}"/>
+                        <Button Name="PomodoroBtn" Content="🍅" Opacity="0.4" Click="PomodoroBtn_Click" Style="{StaticResource IconButton}" ToolTip="{loc:Translate ui.25dk_odak_seansi_baslat_filo_daha}" AutomationProperties.Name="{loc:Translate ui.odak_seansi_baslat_iptal}"/>
+                        <Button Name="WpmRaceBtn" Content="⌨️" Opacity="0.4" Click="WpmRaceBtn_Click" Style="{StaticResource IconButton}" ToolTip="{loc:Translate ui.yazi_yarisi_baslat_ne_kadar_hizli}" AutomationProperties.Name="{loc:Translate ui.yazi_yarisi_baslat_iptal}"/>
+
+                        <Rectangle Width="2" Fill="#000000" Margin="4,7"/>
+
+                        <Button Name="PanelToggleBtn" Content="📋" Click="PanelToggleBtn_Click" Style="{StaticResource IconButton}" ToolTip="{loc:Translate ui.panelleri_gizle_goster}" AutomationProperties.Name="{loc:Translate ui.panelleri_gizle_goster}"/>
+                        <Button Name="ToggleAllUIBtn" Content="👻" Click="ToggleAllUI_Click" Style="{StaticResource IconButton}" ToolTip="{loc:Translate ui.sadece_araclar_modu_tum_arayuzu_gizle}" AutomationProperties.Name="{loc:Translate ui.sadece_araclar_modu_tum_arayuzu_gizle}"/>
+                        <Button Name="HelpBtn" Content="❓" Click="HelpBtn_Click" Style="{StaticResource IconButton}" ToolTip="{loc:Translate ui.kisayollar_yardim}" AutomationProperties.Name="{loc:Translate ui.kisayollar_yardim}"/>
+                        <Button Name="MinimizeBtn" Content="🗕" Click="MinimizeBtn_Click" Style="{StaticResource IconButton}" ToolTip="{loc:Translate ui.kucult}" AutomationProperties.Name="{loc:Translate ui.kucult}"/>
+                        <Button Name="CloseBtn" Content="✕" Click="CloseBtn_Click" Style="{StaticResource IconButtonClose}" ToolTip="{loc:Translate ui.uygulamayi_kapat}" AutomationProperties.Name="{loc:Translate ui.uygulamayi_kapat}"/>
+                    </StackPanel>
+
+                    <!-- Dock'u kendi içine katla/aç -->
+                    <Button Name="DockCollapseBtn" Content="⏶" Click="DockCollapseBtn_Click" Style="{StaticResource IconButton}" Width="26" Margin="4,0,2,0" ToolTip="{loc:Translate ui.dock_u_katla_ac}" AutomationProperties.Name="{loc:Translate ui.dock_u_katla_ac}"/>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+
+        <!-- Tüm kontrol panelleri - gizlenebilir, sürüklenebilir, pinlenebilir grup -->
+        <Canvas Name="PanelsContainer">
+
+        <!-- Left Panel - Stats -->
+        <Border Name="StatsPanel" Width="280" Padding="15" Style="{StaticResource AnimatedPanel}">
+            <StackPanel>
+                <Grid Margin="0,0,0,12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Orientation="Horizontal" Name="StatsPanelHeader" Background="Transparent" Cursor="SizeAll" Tag="{Binding ElementName=StatsPanel}"
+                                MouseLeftButtonDown="PanelHeader_MouseLeftButtonDown" MouseMove="PanelHeader_MouseMove" MouseLeftButtonUp="PanelHeader_MouseLeftButtonUp">
+                        <TextBlock Text="⠿" FontSize="10" Foreground="#3DA9FC" Margin="0,0,8,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
+                        <TextBlock Text="{loc:Translate ui.istatistikler}" FontFamily="{StaticResource PixelFont}" FontSize="8" FontWeight="Bold" Foreground="#FFFFFF" TextTrimming="CharacterEllipsis" IsHitTestVisible="False"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                        <Button Name="StatsCollapseBtn" Content="⏷" Click="PanelBody_Toggle" Tag="{Binding ElementName=StatsPanelBody}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.kucult_buyut}" AutomationProperties.Name="{loc:Translate ui.kucult_buyut}"/>
+                        <Button Name="StatsScaleDownBtn" Content="➖" Click="PanelScaleDown_Click" Tag="{Binding ElementName=StatsPanel}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.paneli_kucult}" AutomationProperties.Name="{loc:Translate ui.paneli_kucult}"/>
+                        <Button Name="StatsScaleUpBtn" Content="➕" Click="PanelScaleUp_Click" Tag="{Binding ElementName=StatsPanel}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.paneli_buyut}" AutomationProperties.Name="{loc:Translate ui.paneli_buyut}"/>
+                        <Button Name="StatsPinBtn" Content="📌" Click="PanelPin_Click" Tag="{Binding ElementName=StatsPanel}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.sabitle}" AutomationProperties.Name="{loc:Translate ui.sabitle}"/>
+                        <Button Name="StatsDetachBtn" Content="↗️" Click="PanelDetach_Click" Tag="{Binding ElementName=StatsPanel}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.panelden_ayir_bagimsiz_pencereye_cikar}" AutomationProperties.Name="{loc:Translate ui.panelden_ayir}"/>
+                    </StackPanel>
+                </Grid>
+
+                <StackPanel Name="StatsPanelBody">
+                <!-- Panel içeriği (Kontroller listesi dahil) sabit bir üst sınırın ötesinde
+                     büyümesin ve alt taraftaki diğer panellerin üstüne binmesin diye kaydırmalı
+                     bir alana alındı. -->
+                <ScrollViewer MaxHeight="480" VerticalScrollBarVisibility="Auto" Style="{StaticResource BeytriumScrollViewer}">
+                <StackPanel>
+                <Grid Margin="0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="{loc:Translate ui.araclar}" Foreground="#C9D6E8"/>
+                    <TextBlock Name="VehicleCountTxt" Text="4" FontFamily="{StaticResource PixelFont}" Grid.Column="1" Foreground="#3DA9FC" FontWeight="Bold"/>
+                </Grid>
+
+                <Grid Margin="0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="{loc:Translate ui.para}" Foreground="#C9D6E8"/>
+                    <TextBlock Name="MoneyTxt" Text="$1000" FontFamily="{StaticResource PixelFont}" Grid.Column="1" Foreground="#4ECDC4" FontWeight="Bold"/>
+                </Grid>
+
+                <Grid Margin="0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="{loc:Translate ui.esyalar}" Foreground="#C9D6E8"/>
+                    <TextBlock Name="ItemCountTxt" Text="5" FontFamily="{StaticResource PixelFont}" Grid.Column="1" Foreground="#FFE66D" FontWeight="Bold"/>
+                </Grid>
+
+                <Grid Margin="0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="{loc:Translate ui.toplam_mesafe}" Foreground="#C9D6E8"/>
+                    <TextBlock Name="TotalMileageTxt" Text="{loc:Translate ui.0_km}" FontFamily="{StaticResource PixelFont}" Grid.Column="1" Foreground="#95E1D3" FontWeight="Bold"/>
+                </Grid>
+
+                <Grid Margin="0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="{loc:Translate ui.oto_kayit_araligi}" Foreground="#C9D6E8" VerticalAlignment="Center"/>
+                    <ComboBox Name="AutoSaveIntervalCombo" Grid.Column="1" Width="90" SelectedIndex="1" SelectionChanged="AutoSaveIntervalCombo_SelectionChanged">
+                        <ComboBoxItem Content="{loc:Translate ui.30_sn}" Tag="30"/>
+                        <ComboBoxItem Content="{loc:Translate ui.60_sn}" Tag="60"/>
+                        <ComboBoxItem Content="{loc:Translate ui.2_dk}" Tag="120"/>
+                        <ComboBoxItem Content="{loc:Translate ui.5_dk}" Tag="300"/>
+                    </ComboBox>
+                </Grid>
+
+                <Separator Margin="0,15" Background="#403DA9FC" Height="1"/>
+
+                <TextBlock Text="{loc:Translate ui.basarimlar}" FontSize="10" FontWeight="Bold" Foreground="#3DA9FC" Margin="0,0,0,8"/>
+                <TextBlock Name="AchievementsSummaryTxt" Text="{loc:Translate ui.0_0_kazanildi}" Foreground="#C9D6E8" FontSize="8" Margin="0,0,0,6"/>
+                <ItemsControl Name="AchievementsListControl">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding Label}" FontSize="8" Margin="0,2">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Foreground" Value="#95E1D3"/>
+                                        <Setter Property="Opacity" Value="1"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding Unlocked}" Value="False">
+                                                <Setter Property="Foreground" Value="#8A96A3"/>
+                                                <Setter Property="Opacity" Value="0.55"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <Separator Margin="0,15" Background="#403DA9FC" Height="1"/>
+
+                <TextBlock Text="{loc:Translate ui.kontroller}" FontSize="10" FontWeight="Bold" Foreground="#3DA9FC" Margin="0,15,0,10"/>
+                <TextBlock TextWrapping="Wrap" Text="{loc:Translate ui.surukle_arac_tasi_firlat}" Foreground="#C9D6E8" FontSize="8" Margin="0,5"/>
+                <TextBlock Text="{loc:Translate ui.tik_arac_sec}" Foreground="#C9D6E8" FontSize="8" Margin="0,5"/>
+                <TextBlock TextWrapping="Wrap" Text="{loc:Translate ui.sag_tik_esya_kullan_menu}" Foreground="#C9D6E8" FontSize="8" Margin="0,5"/>
+                <TextBlock TextWrapping="Wrap" Text="{loc:Translate ui.shiftsurukle_bos_alan_coklu_secim}" Foreground="#C9D6E8" FontSize="8" Margin="0,5"/>
+                <TextBlock TextWrapping="Wrap" Text="{loc:Translate ui.shiftsurukle_arac_seciliyken_rota_ciz}" Foreground="#C9D6E8" FontSize="8" Margin="0,5"/>
+                <TextBlock TextWrapping="Wrap" Text="{loc:Translate ui.delete_secili_araci_sil}" Foreground="#C9D6E8" FontSize="8" Margin="0,5"/>
+                <Rectangle Height="1" Fill="#333DA9FC" Margin="0,6"/>
+                <TextBlock Text="{loc:Translate ui.r_arac_ekle}" Foreground="#C9D6E8" FontSize="8" Margin="0,5"/>
+                <TextBlock Text="{loc:Translate ui.c_temizle}" Foreground="#C9D6E8" FontSize="8" Margin="0,5"/>
+                <TextBlock Text="{loc:Translate ui.ctrls_kaydet}" Foreground="#C9D6E8" FontSize="8" Margin="0,5"/>
+                <TextBlock Text="{loc:Translate ui.l_yukle}" Foreground="#C9D6E8" FontSize="8" Margin="0,5"/>
+                <TextBlock TextWrapping="Wrap" Text="{loc:Translate ui.f_yakit_doldur}" Foreground="#C9D6E8" FontSize="8" Margin="0,5"/>
+                <TextBlock Text="{loc:Translate ui.h_onar}" Foreground="#C9D6E8" FontSize="8" Margin="0,5"/>
+                <TextBlock Text="{loc:Translate ui.e_eklentiler}" Foreground="#C9D6E8" FontSize="8" Margin="0,5"/>
+                <TextBlock TextWrapping="Wrap" Text="{loc:Translate ui.t_tema_degistir}" Foreground="#C9D6E8" FontSize="8" Margin="0,5"/>
+                <TextBlock Text="{loc:Translate ui.m_ses_ac_kapa}" Foreground="#C9D6E8" FontSize="8" Margin="0,5"/>
+                <Rectangle Height="1" Fill="#333DA9FC" Margin="0,6"/>
+                <TextBlock TextWrapping="Wrap" Text="{loc:Translate ui.v_ucus_modu_ac_kapa_secili}" Foreground="#C9D6E8" FontSize="8" Margin="0,5"/>
+                <TextBlock TextWrapping="Wrap" Text="{loc:Translate ui.k_kilitle_kilidi_ac_secili_arac}" Foreground="#C9D6E8" FontSize="8" Margin="0,5"/>
+                <TextBlock TextWrapping="Wrap" Text="{loc:Translate ui.a_otomatik_hareketi_ac_kapa}" Foreground="#C9D6E8" FontSize="8" Margin="0,5"/>
+                <TextBlock TextWrapping="Wrap" Text="{loc:Translate ui.g_tum_arayuzu_gizle}" Foreground="#C9D6E8" FontSize="8" Margin="0,5"/>
+                <Rectangle Height="1" Fill="#333DA9FC" Margin="0,6"/>
+                <TextBlock TextWrapping="Wrap" Text="{loc:Translate ui.bosluk_surus_modunu_ac_kapa}" Foreground="#C9D6E8" FontSize="8" Margin="0,5"/>
+                <TextBlock TextWrapping="Wrap" Text="{loc:Translate ui.suruste_wasd_ok_tuslari_sur_fren}" Foreground="#C9D6E8" FontSize="8" Margin="0,5"/>
+                <TextBlock TextWrapping="Wrap" Text="{loc:Translate ui.suruste_0_9_vites_sec_x}" Foreground="#C9D6E8" FontSize="8" Margin="0,5"/>
+                <TextBlock TextWrapping="Wrap" Text="{loc:Translate ui.suruste_h_korna_cal}" Foreground="#C9D6E8" FontSize="8" Margin="0,5"/>
+                <TextBlock TextWrapping="Wrap" Text="{loc:Translate ui.suruste_tab_araci_degistir}" Foreground="#C9D6E8" FontSize="8" Margin="0,5"/>
+                </StackPanel>
+                </ScrollViewer>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- Right Panel - Vehicle Info -->
+        <Border Name="VehicleInfoPanel" Width="280" Padding="15" Style="{StaticResource AnimatedPanel}">
+            <StackPanel>
+                <Grid Margin="0,0,0,12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Orientation="Horizontal" Name="VehicleInfoPanelHeader" Background="Transparent" Cursor="SizeAll" Tag="{Binding ElementName=VehicleInfoPanel}"
+                                MouseLeftButtonDown="PanelHeader_MouseLeftButtonDown" MouseMove="PanelHeader_MouseMove" MouseLeftButtonUp="PanelHeader_MouseLeftButtonUp">
+                        <TextBlock Text="⠿" FontSize="10" Foreground="#3DA9FC" Margin="0,0,8,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
+                        <TextBlock Text="{loc:Translate ui.secili_arac}" FontFamily="{StaticResource PixelFont}" FontSize="8" FontWeight="Bold" Foreground="#FFFFFF" TextTrimming="CharacterEllipsis" IsHitTestVisible="False"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                        <Button Name="VehicleInfoCollapseBtn" Content="⏷" Click="PanelBody_Toggle" Tag="{Binding ElementName=VehicleInfoPanelBody}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.kucult_buyut}" AutomationProperties.Name="{loc:Translate ui.kucult_buyut}"/>
+                        <Button Name="VehicleInfoScaleDownBtn" Content="➖" Click="PanelScaleDown_Click" Tag="{Binding ElementName=VehicleInfoPanel}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.paneli_kucult}" AutomationProperties.Name="{loc:Translate ui.paneli_kucult}"/>
+                        <Button Name="VehicleInfoScaleUpBtn" Content="➕" Click="PanelScaleUp_Click" Tag="{Binding ElementName=VehicleInfoPanel}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.paneli_buyut}" AutomationProperties.Name="{loc:Translate ui.paneli_buyut}"/>
+                        <Button Name="VehicleInfoPinBtn" Content="📌" Click="PanelPin_Click" Tag="{Binding ElementName=VehicleInfoPanel}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.sabitle}" AutomationProperties.Name="{loc:Translate ui.sabitle}"/>
+                        <Button Name="VehicleInfoDetachBtn" Content="↗️" Click="PanelDetach_Click" Tag="{Binding ElementName=VehicleInfoPanel}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.panelden_ayir_bagimsiz_pencereye_cikar}" AutomationProperties.Name="{loc:Translate ui.panelden_ayir}"/>
+                    </StackPanel>
+                </Grid>
+
+                <StackPanel Name="VehicleInfoPanelBody">
+                <!-- İçerik (araç detayı + upgrade/dorse/liste) sabit bir üst sınırın ötesinde
+                     büyümesin ve alttaki panellerin üstüne binmesin diye kaydırmalı bir alana alındı. -->
+                <ScrollViewer MaxHeight="560" VerticalScrollBarVisibility="Auto" Style="{StaticResource BeytriumScrollViewer}">
+                <StackPanel>
+                <Border Background="#12233F" BorderThickness="2" BorderBrush="#000000" CornerRadius="0" Padding="15" Margin="0,0,0,15">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <StackPanel Grid.Row="0">
+                            <TextBlock Name="VehicleTypeTxt" Text="{loc:Translate ui.araba}" FontFamily="{StaticResource PixelFont}" FontSize="10" FontWeight="Bold" Foreground="#3DA9FC"/>
+                            <TextBox Name="VehicleNameBox" Style="{StaticResource ModernTextBox}" Text="{loc:Translate ui.isimsiz}" Margin="0,5,0,0" TextChanged="VehicleNameBox_TextChanged"/>
+                        </StackPanel>
+
+                        <Grid Grid.Row="1" Margin="0,10,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="{loc:Translate ui.hp}" Foreground="#C9D6E8"/>
+                            <TextBlock Name="HPTxt" Text="100/100" FontFamily="{StaticResource PixelFont}" Grid.Column="1" Foreground="#FF6B6B" FontWeight="Bold"/>
+                        </Grid>
+
+                        <ProgressBar Name="HPBar" Grid.Row="2" Height="8" Margin="0,5,0,0" Foreground="#4ECDC4" Value="100" Maximum="100" Style="{StaticResource RoundedProgressBar}"/>
+
+                        <Grid Grid.Row="3" Margin="0,10,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="{loc:Translate ui.yakit}" Foreground="#C9D6E8"/>
+                            <TextBlock Name="FuelTxt" Text="70/100" FontFamily="{StaticResource PixelFont}" Grid.Column="1" Foreground="#FFE66D" FontWeight="Bold"/>
+                        </Grid>
+
+                        <ProgressBar Name="FuelBar" Grid.Row="4" Height="8" Margin="0,5,0,0" Foreground="#FFE66D" Value="70" Maximum="100" Style="{StaticResource RoundedProgressBar}"/>
+                    </Grid>
+                </Border>
+
+                <TextBlock Text="{loc:Translate ui.mutluluk}" FontSize="9" Foreground="#C9D6E8" Margin="0,0,0,5"/>
+                <ProgressBar Name="HappinessBar" Height="12" Foreground="#95E1D3" Value="100" Maximum="100" Margin="0,0,0,15" Style="{StaticResource RoundedProgressBar}"/>
+
+                <TextBlock Text="{loc:Translate ui.lastik_asinmasi}" FontSize="9" Foreground="#C9D6E8" Margin="0,0,0,5"/>
+                <ProgressBar Name="TireWearBar" Height="12" Foreground="#FF8C42" Value="0" Maximum="100" Margin="0,0,0,15" Style="{StaticResource RoundedProgressBar}"/>
+
+                <StackPanel Name="UpgradesPanel">
+                    <TextBlock Text="{loc:Translate ui.upgradlar}" FontSize="9" FontWeight="Bold" Foreground="#3DA9FC" Margin="0,0,0,8"/>
+                    <TextBlock Name="UpgradesTxt" Text="{loc:Translate ui.yok}" Foreground="#C9D6E8" FontSize="8" Margin="0,0,0,10"/>
+                </StackPanel>
+
+                <TextBlock TextWrapping="Wrap" Text="{loc:Translate ui.neon_alt_isik_rengi}" FontSize="9" FontWeight="Bold" Foreground="#3DA9FC" Margin="0,5,0,5"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,5">
+                    <Button Content="●" FontSize="18" Foreground="#00E5FF" Click="NeonColorBtn_Click" Tag="#00E5FF" Width="32" Height="32" Style="{StaticResource IconButton}" ToolTip="{loc:Translate ui.turkuaz}" AutomationProperties.Name="{loc:Translate ui.turkuaz}"/>
+                    <Button Content="●" FontSize="18" Foreground="#FF007F" Click="NeonColorBtn_Click" Tag="#FF007F" Width="32" Height="32" Style="{StaticResource IconButton}" ToolTip="{loc:Translate ui.neon_pembe}" AutomationProperties.Name="{loc:Translate ui.neon_pembe}"/>
+                    <Button Content="●" FontSize="18" Foreground="#FFD700" Click="NeonColorBtn_Click" Tag="#FFD700" Width="32" Height="32" Style="{StaticResource IconButton}" ToolTip="{loc:Translate ui.altin_sari}" AutomationProperties.Name="{loc:Translate ui.altin_sari}"/>
+                    <Button Content="●" FontSize="18" Foreground="#7F00FF" Click="NeonColorBtn_Click" Tag="#7F00FF" Width="32" Height="32" Style="{StaticResource IconButton}" ToolTip="{loc:Translate ui.mor}" AutomationProperties.Name="{loc:Translate ui.mor}"/>
+                    <Button Content="●" FontSize="18" Foreground="#39FF14" Click="NeonColorBtn_Click" Tag="#39FF14" Width="32" Height="32" Style="{StaticResource IconButton}" ToolTip="{loc:Translate ui.neon_yesil}" AutomationProperties.Name="{loc:Translate ui.neon_yesil}"/>
+                </StackPanel>
+
+                <TextBlock Text="{loc:Translate ui.boyut}" FontSize="9" FontWeight="Bold" Foreground="#3DA9FC" Margin="0,10,0,5"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,5">
+                    <Button Name="ShrinkVehicleBtn" Content="➖" Click="ShrinkVehicleBtn_Click" Width="34" Height="30" Style="{StaticResource IconButton}" ToolTip="{loc:Translate ui.kucult}" AutomationProperties.Name="{loc:Translate ui.kucult}"/>
+                    <TextBlock Name="VehicleScaleTxt" Text="100%" FontFamily="{StaticResource PixelFont}" FontSize="10" Foreground="#FFFFFF" VerticalAlignment="Center" Width="48" TextAlignment="Center"/>
+                    <Button Name="GrowVehicleBtn" Content="➕" Click="GrowVehicleBtn_Click" Width="34" Height="30" Style="{StaticResource IconButton}" ToolTip="{loc:Translate ui.buyut}" AutomationProperties.Name="{loc:Translate ui.buyut}"/>
+                    <Button Name="ResetVehicleScaleBtn" Content="↺" Click="ResetVehicleScaleBtn_Click" Width="30" Height="30" Style="{StaticResource IconButton}" ToolTip="{loc:Translate ui.sifirla}" AutomationProperties.Name="{loc:Translate ui.sifirla}"/>
+                </StackPanel>
+
+                <TextBlock TextWrapping="Wrap" Text="{loc:Translate ui.hizli_islemler}" FontSize="9" FontWeight="Bold" Foreground="#3DA9FC" Margin="0,10,0,5"/>
+                <!-- WrapPanel (eski Orientation="Horizontal" StackPanel yerine): 7 buton artık panelin
+                     dar genişliğine (280px) sığmıyor - StackPanel taşan butonları kırpmadan panel
+                     sınırının dışına, görünmez/erişilemez şekilde taşırıyordu (bkz. kullanıcı raporu:
+                     "sağ/soldaki butonları göremiyorum"). WrapPanel sığmayan butonu otomatik olarak
+                     bir alt satıra kaydırır - hiçbir buton kaybolmaz. -->
+                <WrapPanel HorizontalAlignment="Center" Width="230" Margin="0,0,0,5">
+                    <Button Name="ToggleFlyBtn" Content="🛫" Click="ToggleFlyBtn_Click" Width="40" Height="34" Style="{StaticResource IconButton}" ToolTip="{loc:Translate ui.ucus_modunu_ac_kapat_v}" AutomationProperties.Name="{loc:Translate ui.ucus_modunu_ac_kapat_v}"/>
+                    <Button Name="ToggleLockBtn" Content="🔒" Click="ToggleLockBtn_Click" Width="40" Height="34" Style="{StaticResource IconButton}" ToolTip="{loc:Translate ui.kilitle_kilidi_ac_k}" AutomationProperties.Name="{loc:Translate ui.kilitle_kilidi_ac_k}"/>
+                    <Button Name="ToggleDriveBtn" Content="🎮" Click="ToggleDriveBtn_Click" Width="40" Height="34" Style="{StaticResource IconButton}" ToolTip="{loc:Translate ui.surus_modunu_ac_kapat_bosluk_wasd}" AutomationProperties.Name="{loc:Translate ui.surus_modunu_ac_kapat_bosluk_wasd}"/>
+                    <Button Name="ToggleLearningAIBtn" Content="🧠" Opacity="0.4" Click="ToggleLearningAIBtn_Click" Width="40" Height="34" Style="{StaticResource IconButton}" ToolTip="{loc:Translate ui.akilli_ai_q_learning_ac_kapat}" AutomationProperties.Name="{loc:Translate ui.akilli_ai_ac_kapat_b}"/>
+                    <Button Name="DeleteSelectedBtn" Content="🗑️" Click="DeleteSelectedBtn_Click" Width="40" Height="34" Style="{StaticResource IconButtonClose}" ToolTip="{loc:Translate ui.secili_araci_sil_delete}" AutomationProperties.Name="{loc:Translate ui.secili_araci_sil_delete}"/>
+                    <Button Name="ScreenshotBtn" Content="📸" Click="ScreenshotBtn_Click" Width="40" Height="34" Style="{StaticResource IconButton}" ToolTip="{loc:Translate ui.ekran_goruntusu_al_png}" AutomationProperties.Name="{loc:Translate ui.ekran_goruntusu_al}"/>
+                    <Button Name="GifRecordBtn" Content="🎬" Click="GifRecordBtn_Click" Width="40" Height="34" Style="{StaticResource IconButton}" ToolTip="{loc:Translate ui.3_saniyelik_gif_kaydet}" AutomationProperties.Name="{loc:Translate ui.3_saniyelik_gif_kaydet}"/>
+                </WrapPanel>
+
+                <StackPanel Name="TrailerPanel" Visibility="Collapsed">
+                    <TextBlock TextWrapping="Wrap" Text="{loc:Translate ui.dorse_ekipman}" FontSize="9" FontWeight="Bold" Foreground="#3DA9FC" Margin="0,10,0,5"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,5">
+                        <Button Name="TrailerFlatbedBtn" Content="{loc:Translate ui.acik_kasa}" Tag="flatbed" Click="AttachTrailer_Click" Style="{StaticResource ModernButton}" FontSize="9" Padding="6,6" Margin="2"/>
+                        <Button Name="TrailerTankerBtn" Content="{loc:Translate ui.tanker}" Tag="tanker" Click="AttachTrailer_Click" Style="{StaticResource ModernButton}" FontSize="9" Padding="6,6" Margin="2"/>
+                        <Button Name="TrailerEquipmentBtn" Content="{loc:Translate ui.romork_1}" Tag="equipment" Click="AttachTrailer_Click" Style="{StaticResource ModernButton}" FontSize="9" Padding="6,6" Margin="2"/>
+                        <Button Name="TrailerWagonBtn" Content="{loc:Translate ui.romork_2}" Tag="wagon" Click="AttachTrailer_Click" Style="{StaticResource ModernButton}" FontSize="9" Padding="6,6" Margin="2"/>
+                        <Button Content="✕" Tag="" Click="AttachTrailer_Click" Style="{StaticResource IconButtonClose}" Width="26" Height="26" Margin="2" ToolTip="{loc:Translate ui.dorseyi_cikar}" AutomationProperties.Name="{loc:Translate ui.dorseyi_cikar}"/>
+                    </StackPanel>
+                </StackPanel>
+
+                <Rectangle Height="1.2" Fill="#333DA9FC" Margin="0,12"/>
+
+                <TextBlock TextWrapping="Wrap" Text="{loc:Translate ui.aktif_araclar}" FontSize="9" FontWeight="Bold" Foreground="#3DA9FC" Margin="0,0,0,6"/>
+                <ListBox Name="VehicleListBox" Height="140" Background="#200F1A2C" BorderBrush="#333DA9FC" Foreground="#FFFFFF" SelectionChanged="VehicleListBox_SelectionChanged">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Margin="2,3">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" Orientation="Horizontal">
+                                    <TextBlock Text="{Binding Emoji}" FontSize="16" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                                    <StackPanel VerticalAlignment="Center">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="{Binding Name}" FontSize="9" Foreground="#FFFFFF" VerticalAlignment="Center" FontWeight="SemiBold" FontFamily="Oswald, Segoe UI"/>
+                                            <TextBlock Text="🛫" FontSize="8" Margin="6,0,0,0" VerticalAlignment="Center" Visibility="{Binding IsFlying, Converter={StaticResource BoolToVis}}"/>
+                                            <TextBlock Text="🔒" FontSize="8" Margin="4,0,0,0" VerticalAlignment="Center" Visibility="{Binding IsLocked, Converter={StaticResource BoolToVis}}"/>
+                                        </StackPanel>
+                                        <!-- Aracın hangi model olduğu (ör. "Lüks Sedan") - isim yeniden
+                                             adlandırılmadıysa hepsi "İsimsiz" görünüp listede hangisinin hangi
+                                             araç olduğu anlaşılmıyordu. -->
+                                        <TextBlock Text="{Binding DisplayModel}" FontSize="8" Foreground="#8A96A3" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </StackPanel>
+                                <Button Grid.Column="2" Content="🗑" Tag="{Binding}" Click="DeleteVehicleRow_Click" Style="{StaticResource IconButtonClose}" Width="22" Height="22" FontSize="11" ToolTip="{loc:Translate ui.bu_araci_sil}" AutomationProperties.Name="{loc:Translate ui.bu_araci_sil}"/>
+                            </Grid>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+                </StackPanel>
+                </ScrollViewer>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- Sağ Panel - Vites Arayüzü: sadece Sürüş Modu aktifken görünür. Diğer tüm panellerle
+             aynı standartta: sürüklenebilir başlık, katla/aç, sabitle. Araç tipine göre (iki
+             tekerlekli / diğer) farklı vites düzeni gösterilir. Vites kolu fare ile sürüklenir. -->
+        <Border Name="GearPanel" Width="190" Padding="15" Style="{StaticResource AnimatedPanel}" Visibility="Collapsed">
+            <StackPanel>
+                <Grid Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Orientation="Horizontal" Name="GearPanelHeader" Background="Transparent" Cursor="SizeAll" Tag="{Binding ElementName=GearPanel}"
+                                MouseLeftButtonDown="PanelHeader_MouseLeftButtonDown" MouseMove="PanelHeader_MouseMove" MouseLeftButtonUp="PanelHeader_MouseLeftButtonUp">
+                        <TextBlock Text="⠿" FontSize="10" Foreground="#3DA9FC" Margin="0,0,6,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
+                        <TextBlock Text="{loc:Translate ui.vites}" FontFamily="{StaticResource PixelFont}" FontSize="8" FontWeight="Bold" Foreground="#FFFFFF" TextTrimming="CharacterEllipsis" IsHitTestVisible="False"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                        <Button Name="GearCollapseBtn" Content="⏷" Click="PanelBody_Toggle" Tag="{Binding ElementName=GearPanelBody}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.kucult_buyut}" AutomationProperties.Name="{loc:Translate ui.kucult_buyut}"/>
+                        <Button Name="GearScaleDownBtn" Content="➖" Click="PanelScaleDown_Click" Tag="{Binding ElementName=GearPanel}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.paneli_kucult}" AutomationProperties.Name="{loc:Translate ui.paneli_kucult}"/>
+                        <Button Name="GearScaleUpBtn" Content="➕" Click="PanelScaleUp_Click" Tag="{Binding ElementName=GearPanel}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.paneli_buyut}" AutomationProperties.Name="{loc:Translate ui.paneli_buyut}"/>
+                        <Button Name="GearPinBtn" Content="📌" Click="PanelPin_Click" Tag="{Binding ElementName=GearPanel}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.sabitle}" AutomationProperties.Name="{loc:Translate ui.sabitle}"/>
+                        <Button Name="GearDetachBtn" Content="↗️" Click="PanelDetach_Click" Tag="{Binding ElementName=GearPanel}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.panelden_ayir_bagimsiz_pencereye_cikar}" AutomationProperties.Name="{loc:Translate ui.panelden_ayir}"/>
+                    </StackPanel>
+                </Grid>
+
+                <StackPanel Name="GearPanelBody">
+                <TextBlock Name="GearVehicleNameTxt" Text="{loc:Translate ui.arac}" FontSize="10" Foreground="#C9D6E8" HorizontalAlignment="Center" Margin="0,0,0,6"/>
+
+                <Border Background="#000000" BorderThickness="2" BorderBrush="#3DA9FC" Padding="6,4" Margin="0,0,0,6" HorizontalAlignment="Center">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Name="SpeedTxt" Text="0" FontFamily="{StaticResource PixelFont}" FontSize="16" FontWeight="Bold" Foreground="#FFE66D"
+                                   RenderTransformOrigin="0.5,0.5">
+                            <TextBlock.RenderTransform>
+                                <ScaleTransform x:Name="SpeedTxtScale" ScaleX="1" ScaleY="1"/>
+                            </TextBlock.RenderTransform>
+                        </TextBlock>
+                        <TextBlock Text="{loc:Translate ui.km_s}" FontSize="8" Foreground="#C9D6E8" VerticalAlignment="Bottom" Margin="2,0,0,2"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- Devir (RPM) göstergesi: geçerli vitesin tepe hızına ne kadar yaklaşıldığını
+                     yeşilden kırmızıya geçen bir barla gösterir - gerçek bir takometre hissi verir. -->
+                <Border Background="#000000" BorderThickness="2" BorderBrush="#000000" Height="10" Width="148" Margin="0,0,0,10" ClipToBounds="True">
+                    <Grid HorizontalAlignment="Left">
+                        <Rectangle Name="RpmBarFill" Width="0" HorizontalAlignment="Left" Fill="#39FF14"/>
+                    </Grid>
+                </Border>
+
+                <!-- Range (Aralık) Anahtarı: sadece 12 viteslik kamyon/otobüs gibi Range-splitter'lı
+                     araçlarda görünür - gerçek bir kamyon şanzımanındaki Düşük/Yüksek aralık anahtarı. -->
+                <Button Name="RangeSwitchBtn" Click="RangeSwitchBtn_Click" Style="{StaticResource ModernButton}"
+                        Content="{loc:Translate ui.aralik_yuksek}" FontSize="8" Padding="6,4" Margin="0,0,0,8" Visibility="Collapsed"
+                        ToolTip="{loc:Translate ui.dusuk_aralik_yari_hiz_ama_cok}" AutomationProperties.Name="{loc:Translate ui.range_anahtari}"/>
+
+                <!-- Direksiyon Göstergesi: A/D (zeminde artık gerçek bir manevra/yatış üreten) girdisine
+                     göre gerçek zamanlı döner - oyuncuya "direksiyon kırıyorum" geri bildirimi verir. -->
+                <Canvas Width="46" Height="46" Margin="0,0,0,8" HorizontalAlignment="Center">
+                    <Canvas.RenderTransform>
+                        <RotateTransform x:Name="SteeringWheelRotate" Angle="0" CenterX="23" CenterY="23"/>
+                    </Canvas.RenderTransform>
+                    <Ellipse Width="46" Height="46" Stroke="#556B8C" StrokeThickness="4" Fill="#0A1626"/>
+                    <Line X1="23" Y1="4" X2="23" Y2="23" Stroke="#FFE66D" StrokeThickness="3" StrokeStartLineCap="Round"/>
+                    <Line X1="6" Y1="30" X2="23" Y2="23" Stroke="#556B8C" StrokeThickness="3" StrokeStartLineCap="Round"/>
+                    <Line X1="40" Y1="30" X2="23" Y2="23" Stroke="#556B8C" StrokeThickness="3" StrokeStartLineCap="Round"/>
+                    <Ellipse Width="10" Height="10" Canvas.Left="18" Canvas.Top="18" Fill="#556B8C"/>
+                </Canvas>
+
+                <!-- Gerçekçi H-pattern vites kolu: fare ile sürüklenen 3D görünümlü bir topuz,
+                     metal bir H-yuvası üzerinde vites konumlarına oturur. Sürükleme bırakıldığında
+                     en yakın geçerli vitese "klik" hissiyle kilitlenir. -->
+                <Border Background="#0A1626" BorderThickness="2" BorderBrush="#000000" CornerRadius="4" Padding="4" HorizontalAlignment="Center">
+                    <Canvas Name="GearShifterCanvas" Width="155" Height="150" Background="Transparent">
+                        <!-- H-yuva/sekans çizgisi: araç tipine ve gerçek vites sayısına (TopGear) göre
+                             kod tarafında (BuildGearSlots) dinamik olarak çiziliyor - 6 viteslik bir
+                             otomobil ile 8 viteslik bir traktörün yuva genişliği farklı olmalı. -->
+                        <Path Name="GearTrackPath" Stroke="#2A3F5F" StrokeThickness="4" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+
+                        <!-- Vites yuvası etiketleri buraya kod tarafında (BuildGearSlots) dinamik olarak ekleniyor -->
+                        <Canvas Name="GearSlotLabelsCanvas">
+                            <Canvas.Resources>
+                                <!-- Vites etiketleri (1/2/3/N/R) H-yuvasının çizgileriyle hizalı olacak
+                                     şekilde Canvas.Top ile tek tek konumlanıyor - satır yüksekliği
+                                     kuralı burada onları yuvadan kaydırırdı (bkz. Styles.xaml). -->
+                                <Style TargetType="TextBlock"/>
+                            </Canvas.Resources>
+                        </Canvas>
+
+                        <!-- Kolun gövdesi: SnowRunner/MudRunner tarzı gerçek bir vites kolu gibi topuzdan
+                             sabit tabana (mil yatağı) kadar her karede (bkz. SyncGearShaftLine, GameLoop_Tick
+                             içinde çağrılıyor) YENİDEN çizilir - topuz H-yuvasında nereye giderse gitsin
+                             (animasyonla kayarken, sürüklenirken, salınırken) kol onu takip edip eğilir.
+                             Knob'un ALTINDA kalması için Z-sırası burada, Ellipse'ten ÖNCE. -->
+                        <Ellipse Name="GearBootBase" Width="34" Height="14" Canvas.Left="33" Canvas.Top="135" Fill="#0A0F18" Stroke="#000000" StrokeThickness="1.5"/>
+                        <Line Name="GearShaftLineShadow" X1="50" Y1="72" X2="50" Y2="140" Stroke="#000000" StrokeThickness="7" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Opacity="0.35" IsHitTestVisible="False"/>
+                        <Line Name="GearShaftLine" X1="50" Y1="72" X2="50" Y2="140" Stroke="#7C8CA6" StrokeThickness="5" StrokeStartLineCap="Round" StrokeEndLineCap="Round" IsHitTestVisible="False"/>
+                        <Line Name="GearShaftHighlight" X1="48.5" Y1="74" X2="48.5" Y2="136" Stroke="#C9D6E8" StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Opacity="0.5" IsHitTestVisible="False"/>
+
+                        <!-- Vites topuzu: radyal degrade ile 3D metal/kauçuk his, sürüklenebilir -->
+                        <Ellipse Name="GearKnob" Width="26" Height="26" Canvas.Left="37" Canvas.Top="59" Cursor="Hand"
+                                 MouseLeftButtonDown="GearKnob_MouseLeftButtonDown" MouseMove="GearKnob_MouseMove" MouseLeftButtonUp="GearKnob_MouseLeftButtonUp">
+                            <Ellipse.RenderTransform>
+                                <TransformGroup>
+                                    <ScaleTransform x:Name="GearKnobScale" ScaleX="1" ScaleY="1" CenterX="13" CenterY="13"/>
+                                    <RotateTransform x:Name="GearKnobRotate" Angle="0" CenterX="13" CenterY="13"/>
+                                </TransformGroup>
+                            </Ellipse.RenderTransform>
+                            <Ellipse.Fill>
+                                <RadialGradientBrush GradientOrigin="0.35,0.3" Center="0.4,0.35" RadiusX="0.8" RadiusY="0.8">
+                                    <GradientStop Color="#FFE66D" Offset="0"/>
+                                    <GradientStop Color="#C9922A" Offset="0.55"/>
+                                    <GradientStop Color="#3A2408" Offset="1"/>
+                                </RadialGradientBrush>
+                            </Ellipse.Fill>
+                            <Ellipse.Effect>
+                                <DropShadowEffect Color="#000000" BlurRadius="8" ShadowDepth="2" Opacity="0.6"/>
+                            </Ellipse.Effect>
+                        </Ellipse>
+                    </Canvas>
+                </Border>
+
+                <TextBlock Name="GearCurrentTxt" Text="{loc:Translate ui.vites_1}" FontSize="9" Foreground="#FFE66D" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,10,0,4"
+                           RenderTransformOrigin="0.5,0.5">
+                    <TextBlock.RenderTransform>
+                        <ScaleTransform x:Name="GearCurrentTxtScale" ScaleX="1" ScaleY="1"/>
+                    </TextBlock.RenderTransform>
+                </TextBlock>
+                <TextBlock Text="{loc:Translate ui.wasd_ok_sur}" FontSize="7" Foreground="#C9D6E8" TextWrapping="Wrap" TextAlignment="Center" HorizontalAlignment="Center" Margin="0,4,0,0"/>
+                <TextBlock Text="{loc:Translate ui.h_korna_tab_degistir}" FontSize="7" Foreground="#C9D6E8" TextWrapping="Wrap" TextAlignment="Center" HorizontalAlignment="Center"/>
+                <TextBlock Text="{loc:Translate ui.bosluk_cik}" FontSize="7" Foreground="#C9D6E8" TextWrapping="Wrap" TextAlignment="Center" HorizontalAlignment="Center"/>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- Bottom Panel - Item Shop -->
+        <Border Name="ItemShopPanel" Width="580" Padding="15" Style="{StaticResource AnimatedPanel}">
+            <StackPanel>
+                <Grid Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Orientation="Horizontal" Name="ItemShopPanelHeader" Background="Transparent" Cursor="SizeAll" Tag="{Binding ElementName=ItemShopPanel}"
+                                MouseLeftButtonDown="PanelHeader_MouseLeftButtonDown" MouseMove="PanelHeader_MouseMove" MouseLeftButtonUp="PanelHeader_MouseLeftButtonUp">
+                        <TextBlock Text="⠿" FontSize="10" Foreground="#3DA9FC" Margin="0,0,8,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
+                        <TextBlock Text="{loc:Translate ui.esyalar_2}" FontFamily="{StaticResource PixelFont}" FontSize="8" FontWeight="Bold" Foreground="#FFFFFF" TextTrimming="CharacterEllipsis" IsHitTestVisible="False"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                        <Button Name="ItemShopCollapseBtn" Content="⏵" Click="PanelBody_Toggle" Tag="{Binding ElementName=ItemShopPanelBody}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.kucult_buyut}" AutomationProperties.Name="{loc:Translate ui.kucult_buyut}"/>
+                        <Button Name="ItemShopScaleDownBtn" Content="➖" Click="PanelScaleDown_Click" Tag="{Binding ElementName=ItemShopPanel}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.paneli_kucult}" AutomationProperties.Name="{loc:Translate ui.paneli_kucult}"/>
+                        <Button Name="ItemShopScaleUpBtn" Content="➕" Click="PanelScaleUp_Click" Tag="{Binding ElementName=ItemShopPanel}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.paneli_buyut}" AutomationProperties.Name="{loc:Translate ui.paneli_buyut}"/>
+                        <Button Name="ItemShopPinBtn" Content="📌" Click="PanelPin_Click" Tag="{Binding ElementName=ItemShopPanel}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.sabitle}" AutomationProperties.Name="{loc:Translate ui.sabitle}"/>
+                        <Button Name="ItemShopDetachBtn" Content="↗️" Click="PanelDetach_Click" Tag="{Binding ElementName=ItemShopPanel}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.panelden_ayir_bagimsiz_pencereye_cikar}" AutomationProperties.Name="{loc:Translate ui.panelden_ayir}"/>
+                    </StackPanel>
+                </Grid>
+
+                <!-- İlk açılışta panel gövdesi kapalı başlar - masaüstü daha az kalabalık görünür,
+                     istenirse ⏵ ile açılır. -->
+                <StackPanel Name="ItemShopPanelBody" Visibility="Collapsed">
+                <ScrollViewer Height="90" VerticalScrollBarVisibility="Auto" Style="{StaticResource BeytriumScrollViewer}">
+                    <ItemsControl Name="ItemsListControl">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Background="#12233F" BorderThickness="2" BorderBrush="#000000" CornerRadius="0" Padding="10" Margin="0,0,10,10" Width="150">
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding Icon}" FontSize="24" HorizontalAlignment="Center"/>
+                                        <TextBlock Text="{Binding Name}" FontSize="8" Foreground="#FFFFFF" TextWrapping="Wrap" Margin="0,5,0,0"/>
+                                        <TextBlock Text="{Binding Description}" FontSize="9" Foreground="#C9D6E8" Margin="0,3,0,0"/>
+                                        <Button Content="{loc:Translate ui.kullan}" Tag="{Binding}" Click="UseItemBtn_Click" Style="{StaticResource ModernButton}" FontSize="9" Padding="4,4" Margin="0,6,0,0"/>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel/>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                    </ItemsControl>
+                </ScrollViewer>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- Bottom Right - Quick Actions -->
+        <Border Name="QuickActionsPanel" Width="280" Padding="15" Style="{StaticResource AnimatedPanel}">
+            <StackPanel>
+                <Grid Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Orientation="Horizontal" Name="QuickActionsPanelHeader" Background="Transparent" Cursor="SizeAll" Tag="{Binding ElementName=QuickActionsPanel}"
+                                MouseLeftButtonDown="PanelHeader_MouseLeftButtonDown" MouseMove="PanelHeader_MouseMove" MouseLeftButtonUp="PanelHeader_MouseLeftButtonUp">
+                        <TextBlock Text="⠿" FontSize="10" Foreground="#3DA9FC" Margin="0,0,8,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
+                        <TextBlock Text="{loc:Translate ui.hizli_islemler_2}" FontFamily="{StaticResource PixelFont}" FontSize="8" FontWeight="Bold" Foreground="#FFFFFF" TextTrimming="CharacterEllipsis" IsHitTestVisible="False"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                        <Button Name="QuickActionsCollapseBtn" Content="⏵" Click="PanelBody_Toggle" Tag="{Binding ElementName=QuickActionsScrollViewer}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.kucult_buyut}" AutomationProperties.Name="{loc:Translate ui.kucult_buyut}"/>
+                        <Button Name="QuickActionsScaleDownBtn" Content="➖" Click="PanelScaleDown_Click" Tag="{Binding ElementName=QuickActionsPanel}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.paneli_kucult}" AutomationProperties.Name="{loc:Translate ui.paneli_kucult}"/>
+                        <Button Name="QuickActionsScaleUpBtn" Content="➕" Click="PanelScaleUp_Click" Tag="{Binding ElementName=QuickActionsPanel}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.paneli_buyut}" AutomationProperties.Name="{loc:Translate ui.paneli_buyut}"/>
+                        <Button Name="QuickActionsPinBtn" Content="📌" Click="PanelPin_Click" Tag="{Binding ElementName=QuickActionsPanel}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.sabitle}" AutomationProperties.Name="{loc:Translate ui.sabitle}"/>
+                        <Button Name="QuickActionsDetachBtn" Content="↗️" Click="PanelDetach_Click" Tag="{Binding ElementName=QuickActionsPanel}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.panelden_ayir_bagimsiz_pencereye_cikar}" AutomationProperties.Name="{loc:Translate ui.panelden_ayir}"/>
+                    </StackPanel>
+                </Grid>
+
+                <ScrollViewer Name="QuickActionsScrollViewer" MaxHeight="560" VerticalScrollBarVisibility="Auto" Style="{StaticResource BeytriumScrollViewer}" Visibility="Collapsed">
+                <StackPanel Name="QuickActionsPanelBody">
+                <Button Name="SpawnVehicleQuickBtn" Content="{loc:Translate ui.arac_dogur}" Click="AddVehicleBtn_Click" Style="{StaticResource ModernButton}" Margin="0,3" ToolTip="{loc:Translate ui.yeni_bir_arac_ekle_r}"/>
+                <Button Name="CallVehicleQuickBtn" Content="{loc:Translate ui.arac_cagir}" Click="CallVehicleBtn_Click" Style="{StaticResource ModernButton}" Margin="0,3" ToolTip="{loc:Translate ui.secili_araci_imlece_cagir_q_2}"/>
+                <Button Name="ImportCustomVehicleBtn" Content="{loc:Translate ui.kendi_aracini_ekle}" Click="ImportCustomVehicleBtn_Click" Style="{StaticResource ModernButton}" Margin="0,3" ToolTip="{loc:Translate ui.kendi_arac_gorselini_beyaz_arkaplanli_ice}"/>
+
+                <Rectangle Height="1.2" Fill="#333DA9FC" Margin="0,7"/>
+
+                <TextBlock Text="{loc:Translate ui.magaza}" FontFamily="{StaticResource PixelFont}" FontSize="10" FontWeight="Bold" Foreground="#fbca1f" Margin="0,0,0,5"/>
+                <Grid Margin="0,2">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Button Name="AddFuelBtn" Content="{loc:Translate ui.yakit_10}" Click="AddFuelBtn_Click" Style="{StaticResource ModernButton}" FontSize="8" Padding="4,7" Margin="0,0,3,0"/>
+                    <Button Name="AddRepairBtn" Content="{loc:Translate ui.onarim_30}" Click="AddRepairBtn_Click" Style="{StaticResource ModernButton}" FontSize="8" Padding="4,7" Grid.Column="1" Margin="3,0,0,0"/>
+                </Grid>
+                <TextBlock Text="{loc:Translate ui.yukseltmeler}" FontSize="9" Foreground="#889" Margin="1,4,0,2"/>
+                <UniformGrid Columns="2" Margin="0,0,0,3">
+                    <Button Content="🚀 $100" Click="BuyUpgradeBtn_Click" Tag="speed" Style="{StaticResource ModernButton}" FontSize="8" BorderThickness="2" Padding="2,5" Margin="1" ToolTip="{loc:Translate ui.hiz_upgradi_20}"/>
+                    <Button Content="⚡ $80" Click="BuyUpgradeBtn_Click" Tag="acceleration" Style="{StaticResource ModernButton}" FontSize="8" BorderThickness="2" Padding="2,5" Margin="1" ToolTip="{loc:Translate ui.hizlanma_upgradi_15}"/>
+                    <Button Content="💚 $60" Click="BuyUpgradeBtn_Click" Tag="efficiency" Style="{StaticResource ModernButton}" FontSize="8" BorderThickness="2" Padding="2,5" Margin="1" ToolTip="{loc:Translate ui.verimlilik_upgradi_25}"/>
+                    <Button Content="💪 $90" Click="BuyUpgradeBtn_Click" Tag="durability" Style="{StaticResource ModernButton}" FontSize="8" BorderThickness="2" Padding="2,5" Margin="1" ToolTip="{loc:Translate ui.dayaniklilik_upgradi_30}"/>
+                </UniformGrid>
+                <TextBlock Text="{loc:Translate ui.dekorasyonlar}" FontSize="9" Foreground="#889" Margin="1,4,0,2"/>
+                <UniformGrid Columns="2" Margin="0,0,0,3">
+                    <Button Content="🎨 $20" Click="BuyDecorationBtn_Click" Tag="paint" Style="{StaticResource ModernButton}" FontSize="8" BorderThickness="2" Padding="2,5" Margin="1" ToolTip="{loc:Translate ui.boya}"/>
+                    <Button Content="✨ $15" Click="BuyDecorationBtn_Click" Tag="sticker" Style="{StaticResource ModernButton}" FontSize="8" BorderThickness="2" Padding="2,5" Margin="1" ToolTip="{loc:Translate ui.sticker_rozet}"/>
+                    <Button Content="🏎️ $50" Click="BuyDecorationBtn_Click" Tag="spoiler" Style="{StaticResource ModernButton}" FontSize="8" BorderThickness="2" Padding="2,5" Margin="1" ToolTip="{loc:Translate ui.spoiler}"/>
+                    <Button Content="💡 $40" Click="BuyDecorationBtn_Click" Tag="lights" Style="{StaticResource ModernButton}" FontSize="8" BorderThickness="2" Padding="2,5" Margin="1" ToolTip="{loc:Translate ui.led_isik_guclu_glow}"/>
+                </UniformGrid>
+
+                <Rectangle Height="1.2" Fill="#333DA9FC" Margin="0,7"/>
+
+                <!-- Ayarlar: kirlenme/yakıt gibi genel oyun çarpanları - varsayılan olarak katlı. -->
+                <Grid Margin="0,0,0,4">
+                    <TextBlock Text="{loc:Translate ui.ayarlar}" FontFamily="{StaticResource PixelFont}" FontSize="10" FontWeight="Bold" Foreground="#fbca1f"/>
+                    <Button Name="SettingsToggleBtn" Content="⏵" Click="PanelBody_Toggle" Tag="{Binding ElementName=SettingsBody}" Style="{StaticResource IconButton}" Width="22" Height="22" HorizontalAlignment="Right" ToolTip="{loc:Translate ui.ac_kapa}" AutomationProperties.Name="{loc:Translate ui.ac_kapa}"/>
+                </Grid>
+                <StackPanel Name="SettingsBody" Visibility="Collapsed">
+                    <StackPanel.Resources>
+                        <!-- Ayar etiketlerinin ortak stili. Satır yüksekliği garantisi artık
+                             uygulama genelindeki tek kuraldan geliyor (bkz. Styles.xaml
+                             GuaranteedLineHeight); burada elle LineHeight verilmiyor. -->
+                        <Style x:Key="SettingLabel" TargetType="TextBlock" BasedOn="{StaticResource GuaranteedLineHeight}">
+                            <Setter Property="FontSize" Value="9"/>
+                            <Setter Property="Foreground" Value="#889"/>
+                            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                            <Setter Property="Margin" Value="1,6,0,3"/>
+                        </Style>
+                    </StackPanel.Resources>
+
+                    <!-- Dil seçimi: tepsi menüsünde de var, ama Steam oyuncusu dili AYARLAR altında
+                         arar - burada olması keşfedilebilirliği belirgin şekilde artırıyor. Seçim
+                         anında uygulanır, yeniden başlatma gerekmez (bkz. Services/Localization.cs). -->
+                    <Grid Margin="0,3">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="{loc:Translate ui.dil}" FontSize="10" Foreground="#CCD" VerticalAlignment="Center"/>
+                        <ComboBox Name="LanguageCombo" Grid.Column="1" Width="110" SelectionChanged="LanguageCombo_SelectionChanged"
+                                  ToolTip="{loc:Translate ui.arayuz_dilini_degistir}" AutomationProperties.Name="{loc:Translate ui.dil}"/>
+                    </Grid>
+
+                    <!-- Ses seviyeleri: eski ses sistemi yalnızca topyekûn sustur sunuyordu.
+                         Ana/Efekt/Müzik ayrımı ticari bir oyunda standart beklentidir. -->
+                    <TextBlock Text="{loc:Translate ui.ses_seviyeleri}" Style="{StaticResource SettingLabel}" Margin="1,10,0,4" Foreground="#AAB"/>
+
+                    <TextBlock Style="{StaticResource SettingLabel}">
+                        <Run Text="{loc:Translate ui.ana_ses}"/><Run Name="MasterVolumeTxt" Text="80%"/>
+                    </TextBlock>
+                    <Slider Name="MasterVolumeSlider" Style="{StaticResource ThemedSlider}" Minimum="0" Maximum="1" Value="0.8" SmallChange="0.05" LargeChange="0.1" ValueChanged="MasterVolumeSlider_ValueChanged" ToolTip="{loc:Translate ui.tum_seslerin_genel_seviyesi}" AutomationProperties.Name="{loc:Translate ui.ana_ses}"/>
+
+                    <TextBlock Style="{StaticResource SettingLabel}">
+                        <Run Text="{loc:Translate ui.efekt_sesi}"/><Run Name="SfxVolumeTxt" Text="85%"/>
+                    </TextBlock>
+                    <Slider Name="SfxVolumeSlider" Style="{StaticResource ThemedSlider}" Minimum="0" Maximum="1" Value="0.85" SmallChange="0.05" LargeChange="0.1" ValueChanged="SfxVolumeSlider_ValueChanged" ToolTip="{loc:Translate ui.motor_korna_carpisma_gibi_efektler}" AutomationProperties.Name="{loc:Translate ui.efekt_sesi}"/>
+
+                    <CheckBox Name="DirtEffectCheckBox" Content="{loc:Translate ui.kirlenme_efekti}" Foreground="#CCD" FontSize="10" Margin="0,8,0,3" Click="DirtEffectCheckBox_Click" ToolTip="{loc:Translate ui.arac_govdesinde_kirlilik_arttikca_camur_lekesi}"/>
+
+                    <TextBlock Style="{StaticResource SettingLabel}">
+                        <Run Text="{loc:Translate ui.kirlilik_carpani}"/><Run Name="DirtMultiplierTxt" Text="1.0x"/>
+                    </TextBlock>
+                    <Slider Name="DirtMultiplierSlider" Style="{StaticResource ThemedSlider}" Minimum="0" Maximum="3" Value="1" SmallChange="0.1" LargeChange="0.5" ValueChanged="DirtMultiplierSlider_ValueChanged" ToolTip="{loc:Translate ui.araclarin_ne_hizda_kirlenecegini_olcekler_0}"/>
+
+                    <TextBlock Style="{StaticResource SettingLabel}">
+                        <Run Text="{loc:Translate ui.yakit_tuketimi_carpani}"/><Run Name="FuelMultiplierTxt" Text="1.0x"/>
+                    </TextBlock>
+                    <Slider Name="FuelMultiplierSlider" Style="{StaticResource ThemedSlider}" Minimum="0" Maximum="3" Value="1" SmallChange="0.1" LargeChange="0.5" ValueChanged="FuelMultiplierSlider_ValueChanged" ToolTip="{loc:Translate ui.araclarin_ne_hizda_yakit_tuketecegini_olcekler}"/>
+                </StackPanel>
+
+                <Rectangle Height="1.2" Fill="#333DA9FC" Margin="0,7"/>
+
+                <!-- Ortam/olay butonları (8 tane) varsayılan olarak katlı - panel her zaman uzun
+                     ve dağınık durmasın diye. İhtiyaç oldukça tek tıkla açılabiliyor. -->
+                <Grid Margin="0,0,0,4">
+                    <TextBlock Text="{loc:Translate ui.ortam_amp_olaylar}" FontFamily="{StaticResource PixelFont}" FontSize="10" FontWeight="Bold" Foreground="#fbca1f"/>
+                    <Button Name="EnvironmentEventsToggleBtn" Content="⏵" Click="PanelBody_Toggle" Tag="{Binding ElementName=EnvironmentEventsBody}" Style="{StaticResource IconButton}" Width="22" Height="22" HorizontalAlignment="Right" ToolTip="{loc:Translate ui.ac_kapa}" AutomationProperties.Name="{loc:Translate ui.ac_kapa}"/>
+                </Grid>
+                <StackPanel Name="EnvironmentEventsBody" Visibility="Collapsed">
+                    <!-- Bu bölüm tek başına da kaydırılabilir: dış ScrollViewer'ın MaxHeight'ı diğer
+                         açık bölümlerle (Ayarlar vb.) birlikte dolduğunda buradaki butonların bir
+                         kısmı görünmeden kalmasın diye kendi sınırlı yüksekliği ve kaydırma çubuğu var. -->
+                    <ScrollViewer MaxHeight="260" VerticalScrollBarVisibility="Auto" Style="{StaticResource BeytriumScrollViewer}">
+                    <StackPanel>
+                    <Button Name="ToggleRainBtn" Content="{loc:Translate ui.yagmur_baslat_durdur}" Click="ToggleRainBtn_Click" Style="{StaticResource ModernButton}" Margin="0,3"/>
+                    <Button Name="ToggleSnowBtn" Content="{loc:Translate ui.kar_baslat_durdur}" Click="ToggleSnowBtn_Click" Style="{StaticResource ModernButton}" Margin="0,3" ToolTip="{loc:Translate ui.kis_temali_hava_durumu_yagmurla_ayni}"/>
+                    <Button Name="AddTrafficLightBtn" Content="{loc:Translate ui.trafik_isigi_yerlestir}" Click="AddTrafficLightBtn_Click" Style="{StaticResource ModernButton}" Margin="0,3"/>
+                    <Button Name="AddStationBtn" Content="{loc:Translate ui.istasyon_yerlestir}" Click="AddStationBtn_Click" Style="{StaticResource ModernButton}" Margin="0,3" ToolTip="{loc:Translate ui.yakinina_gelen_araclari_otomatik_yakit_doldurur}"/>
+                    <Button Name="AddConeBtn" Content="{loc:Translate ui.yol_calismasi_ekle}" Click="AddConeBtn_Click" Style="{StaticResource ModernButton}" Margin="0,3" ToolTip="{loc:Translate ui.yakinindan_gecen_araclari_yavaslatir}"/>
+                    <Button Name="AddPoliceBtn" Content="{loc:Translate ui.trafik_polisi_ekle}" Click="AddPoliceBtn_Click" Style="{StaticResource ModernButton}" Margin="0,3" ToolTip="{loc:Translate ui.yolu_keser_bakimi_dusuk_hp_lt}"/>
+                    <Button Name="AddRecycleTruckBtn" Content="{loc:Translate ui.geri_donusum_kamyonu}" Click="AddRecycleTruckBtn_Click" Style="{StaticResource ModernButton}" Margin="0,3" ToolTip="{loc:Translate ui.gorsel_bir_olay_gercek_geri_donusum}"/>
+                    <Button Name="AddFuelCanBtn" Content="{loc:Translate ui.bidonla_manuel_doldur}" Click="AddFuelCanBtn_Click" Style="{StaticResource ModernButton}" Margin="0,3" ToolTip="{loc:Translate ui.bidonu_al_bir_araca_tikla_iptal}"/>
+                    <Button Name="StartCargoBtn" Content="{loc:Translate ui.kargo_gorevi_baslat}" Click="StartCargoBtn_Click" Style="{StaticResource ModernButton}" Margin="0,3"/>
+                    </StackPanel>
+                    </ScrollViewer>
+                </StackPanel>
+                </StackPanel>
+                </ScrollViewer>
+            </StackPanel>
+        </Border>
+
+        <!-- Eklentiler Paneli - 🧩 dock butonuyla aç/kapa -->
+        <Border Name="ExpansionsPanel" Width="320" Padding="15" Style="{StaticResource AnimatedPanel}" Visibility="Collapsed" Opacity="0">
+            <StackPanel>
+                <Grid Margin="0,0,0,12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Orientation="Horizontal" Name="ExpansionsPanelHeader" Background="Transparent" Cursor="SizeAll" Tag="{Binding ElementName=ExpansionsPanel}"
+                                MouseLeftButtonDown="PanelHeader_MouseLeftButtonDown" MouseMove="PanelHeader_MouseMove" MouseLeftButtonUp="PanelHeader_MouseLeftButtonUp">
+                        <TextBlock Text="⠿" FontSize="10" Foreground="#3DA9FC" Margin="0,0,8,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
+                        <TextBlock Text="{loc:Translate ui.eklentiler}" FontFamily="{StaticResource PixelFont}" FontSize="8" FontWeight="Bold" Foreground="#FFFFFF" TextTrimming="CharacterEllipsis" IsHitTestVisible="False"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                        <Button Name="ExpansionsScaleDownBtn" Content="➖" Click="PanelScaleDown_Click" Tag="{Binding ElementName=ExpansionsPanel}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.paneli_kucult}" AutomationProperties.Name="{loc:Translate ui.paneli_kucult}"/>
+                        <Button Name="ExpansionsScaleUpBtn" Content="➕" Click="PanelScaleUp_Click" Tag="{Binding ElementName=ExpansionsPanel}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.paneli_buyut}" AutomationProperties.Name="{loc:Translate ui.paneli_buyut}"/>
+                        <Button Name="ExpansionsPinBtn" Content="📌" Click="PanelPin_Click" Tag="{Binding ElementName=ExpansionsPanel}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.sabitle}" AutomationProperties.Name="{loc:Translate ui.sabitle}"/>
+                        <Button Name="ExpansionsDetachBtn" Content="↗️" Click="PanelDetach_Click" Tag="{Binding ElementName=ExpansionsPanel}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.panelden_ayir_bagimsiz_pencereye_cikar}" AutomationProperties.Name="{loc:Translate ui.panelden_ayir}"/>
+                    </StackPanel>
+                </Grid>
+
+                <TextBlock Text="{loc:Translate ui.araclara_ekstra_davranislar_ozellikler_ekler_sonradan}" FontSize="10" Foreground="#C9D6E8" TextWrapping="Wrap" Margin="0,0,0,10"/>
+
+                <ItemsControl Name="ExpansionsListControl">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Background="#12233F" BorderThickness="2" BorderBrush="#000000" CornerRadius="0" Padding="12" Margin="0,0,0,8">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <TextBlock Grid.Column="0" Text="{Binding Icon}" FontSize="22" VerticalAlignment="Center" Margin="0,0,10,0"/>
+
+                                    <!-- Eklenti adı ve açıklaması: ad satırı panel genişliğini aşınca
+                                         kırpılıyordu ("Otomatik Tra...", "Kargo Görevle..."), sarılan
+                                         açıklama satırları da birbirinin üstüne biniyordu. Sarma
+                                         burada, satır yüksekliği garantisi ise uygulama genelindeki
+                                         tek kuralda (bkz. Styles.xaml GuaranteedLineHeight). -->
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Name}" FontSize="10" FontWeight="Bold" Foreground="#FFFFFF"
+                                                   TextWrapping="Wrap"/>
+                                        <TextBlock Text="{Binding Description}" FontSize="10" Foreground="#C9D6E8" TextWrapping="Wrap"
+                                                   Margin="0,4,0,0"/>
+                                    </StackPanel>
+
+                                    <Button Grid.Column="2" Content="{Binding StatusIcon}" Click="ExpansionToggle_Click" Tag="{Binding Id}"
+                                            Style="{StaticResource IconButton}" Width="34" Height="34" VerticalAlignment="Center" ToolTip="{Binding StatusLabel}" AutomationProperties.Name="{Binding StatusLabel}"/>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <Rectangle Height="2" Fill="#000000" Margin="0,12,0,10"/>
+
+                <!-- IoT/MQTT Telemetri Yayını: isteğe bağlı, varsayılan kapalı. Kullanıcının kendi
+                     MQTT broker'ına (ör. yerel Home Assistant/Mosquitto) filo telemetrisi yayınlar.
+                     Gerçek bir donanım/broker gerektirdiğinden ve bu ortamda test edilecek fiziksel
+                     bir broker bulunmadığından, bağlantı/yayın hataları sessizce ele alınır (bkz.
+                     Services/IoTTelemetryService.cs) - başarısızlık oyunun geri kalanını etkilemez. -->
+                <TextBlock Text="{loc:Translate ui.iot_mqtt_telemetri_deneysel}" FontSize="10" FontWeight="Bold" Foreground="#3DA9FC" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                <TextBlock Text="{loc:Translate ui.filo_verisini_arac_sayisi_para_mesafe}" FontSize="9" Foreground="#C9D6E8" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                <TextBox Name="IoTBrokerBox" Text="{loc:Translate ui.localhost_1883}" Style="{StaticResource ModernTextBox}" FontSize="10" Margin="0,0,0,6"
+                         ToolTip="{loc:Translate ui.iot_broker_ipucu}"/>
+                <TextBox Name="IoTTopicBox" Text="{loc:Translate ui.automotion_telemetry}" Style="{StaticResource ModernTextBox}" FontSize="10" Margin="0,0,0,6"/>
+
+                <!-- Güvenlik (P1-6): bağlantı eskiden HER ZAMAN şifresiz ve kimlik doğrulamasızdı.
+                     MQTT'de kullanıcı adı/parola CONNECT paketinde açık metin taşındığından, kimlik
+                     bilgisi girildiğinde TLS olmadan bağlanmak kullanıcıya açıkça uyarılır
+                     (bkz. IoTConnectBtn_Click). -->
+                <CheckBox Name="IoTUseTlsCheck" Content="{loc:Translate ui.iot_tls_kullan}" Margin="0,2,0,4"
+                          Click="IoTUseTlsCheck_Click" ToolTip="{loc:Translate ui.iot_tls_ipucu}"/>
+                <CheckBox Name="IoTAllowUntrustedCheck" Content="{loc:Translate ui.iot_sertifika_dogrulamasini_atla}" Margin="14,0,0,6"
+                          IsEnabled="False" ToolTip="{loc:Translate ui.iot_sertifika_ipucu}"/>
+
+                <!-- Kimlik bilgileri isteğe bağlı: boş bırakılırsa anonim bağlanılır (broker izin
+                     veriyorsa). Parola diske YAZILMAZ - her oturumda yeniden girilir; adres, konu,
+                     kullanıcı adı ve TLS tercihleri settings.json'da saklanır. -->
+                <TextBlock Text="{loc:Translate ui.iot_kullanici_adi}" FontSize="9" Foreground="#889" Margin="1,2,0,2"/>
+                <TextBox Name="IoTUsernameBox" Style="{StaticResource ModernTextBox}" FontSize="10" Margin="0,0,0,6"
+                         ToolTip="{loc:Translate ui.iot_kullanici_adi_ipucu}" AutomationProperties.Name="{loc:Translate ui.iot_kullanici_adi}"/>
+
+                <TextBlock Text="{loc:Translate ui.iot_parola}" FontSize="9" Foreground="#889" Margin="1,0,0,2"/>
+                <PasswordBox Name="IoTPasswordBox" Style="{StaticResource ModernPasswordBox}" FontSize="10" Margin="0,0,0,6"
+                             ToolTip="{loc:Translate ui.iot_parola_ipucu}" AutomationProperties.Name="{loc:Translate ui.iot_parola}"/>
+
+                <Button Name="IoTConnectBtn" Content="{loc:Translate ui.baglan}" Click="IoTConnectBtn_Click" Style="{StaticResource ModernButton}" HorizontalAlignment="Stretch" Margin="0,0,0,6"/>
+                <TextBlock Name="IoTStatusTxt" Text="{loc:Translate ui.bagli_degil}" FontSize="9" Foreground="#C9D6E8" TextWrapping="Wrap"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Tek Konsolide Menü: eskiden ekranın altı ayrı köşesine dağılmış paneller (İstatistikler,
+             Seçili Araç, Vites, Eşyalar, Hızlı İşlemler, Eklentiler) kalabalık durmasın diye TEK bir
+             sekmeli pencerede toplanıyor. Sekme içerikleri KOPYA değil - o panellerin AYNI (referans)
+             Border'ları uygulama başlarken kod tarafında (bkz. MainWindow.xaml.cs
+             MoveConsolidatedPanelsIntoTabs) buraya taşınıyor, böylece sürükleme/sabitleme/küçültme
+             ve tüm veri bağlamaları birebir eskisi gibi çalışmaya devam ediyor. -->
+        <Border Name="MasterPanel" Width="340" Padding="15" Style="{StaticResource AnimatedPanel}">
+            <StackPanel>
+                <Grid Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Orientation="Horizontal" Name="MasterPanelHeader" Background="Transparent" Cursor="SizeAll" Tag="{Binding ElementName=MasterPanel}"
+                                MouseLeftButtonDown="PanelHeader_MouseLeftButtonDown" MouseMove="PanelHeader_MouseMove" MouseLeftButtonUp="PanelHeader_MouseLeftButtonUp">
+                        <TextBlock Text="⠿" FontSize="10" Foreground="#3DA9FC" Margin="0,0,8,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
+                        <TextBlock Text="{loc:Translate ui.paneller}" FontFamily="{StaticResource PixelFont}" FontSize="8" FontWeight="Bold" Foreground="#FFFFFF" TextTrimming="CharacterEllipsis" IsHitTestVisible="False"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                        <Button Name="MasterScaleDownBtn" Content="➖" Click="PanelScaleDown_Click" Tag="{Binding ElementName=MasterPanel}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.paneli_kucult}" AutomationProperties.Name="{loc:Translate ui.paneli_kucult}"/>
+                        <Button Name="MasterScaleUpBtn" Content="➕" Click="PanelScaleUp_Click" Tag="{Binding ElementName=MasterPanel}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.paneli_buyut}" AutomationProperties.Name="{loc:Translate ui.paneli_buyut}"/>
+                        <Button Name="MasterPinBtn" Content="📌" Click="PanelPin_Click" Tag="{Binding ElementName=MasterPanel}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.sabitle}" AutomationProperties.Name="{loc:Translate ui.sabitle}"/>
+                    </StackPanel>
+                </Grid>
+
+                <TabControl Name="MasterTabControl" Style="{StaticResource BeytriumTabControl}">
+                    <TabItem Name="TabStats" Header="{loc:Translate ui.istatistik}" Style="{StaticResource BeytriumTabItem}"/>
+                    <TabItem Name="TabVehicle" Header="{loc:Translate ui.arac_2}" Style="{StaticResource BeytriumTabItem}"/>
+                    <TabItem Name="TabGear" Header="{loc:Translate ui.vites_2}" Style="{StaticResource BeytriumTabItem}"/>
+                    <TabItem Name="TabShop" Header="{loc:Translate ui.esya}" Style="{StaticResource BeytriumTabItem}"/>
+                    <TabItem Name="TabQuick" Header="{loc:Translate ui.hizli}" Style="{StaticResource BeytriumTabItem}"/>
+                    <TabItem Name="TabExpansions" Header="{loc:Translate ui.eklenti}" Style="{StaticResource BeytriumTabItem}"/>
+                </TabControl>
+            </StackPanel>
+        </Border>
+
+        </Canvas>
+
+        <!-- Bildirim/Uyarı Toast'u (yakıt/hasar/başarım bildirimleri) -->
+        <Border Name="ToastPanel" Background="#F0001F5B" BorderThickness="3" BorderBrush="#000000" CornerRadius="0"
+                Padding="14,10" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,24,24"
+                Opacity="0" IsHitTestVisible="False" MaxWidth="320">
+            <Border.Effect>
+                <DropShadowEffect Color="#000000" BlurRadius="0" ShadowDepth="4" Opacity="0.6"/>
+            </Border.Effect>
+            <TextBlock Name="ToastText" Text="" FontFamily="{StaticResource PixelFont}" FontSize="9" FontWeight="Bold" Foreground="#fbca1f" TextWrapping="Wrap"/>
+        </Border>
+
+        <!-- Araç Seçme ve Ekleme Modali (Vehicle Spawn Modal) - Galeri Düzeni -->
+        <Grid Name="SpawnModal" Visibility="Collapsed" Background="#90000000" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+            <Border Name="SpawnModalBox" Width="920" Height="600" Background="#FFFFCC" CornerRadius="0" BorderThickness="4" BorderBrush="#000000" Padding="20" HorizontalAlignment="Center" VerticalAlignment="Center">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="0" ShadowDepth="8" Opacity="1" Color="#000000" Direction="315"/>
+                </Border.Effect>
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Header -->
+                    <Grid Grid.Row="0" Margin="0,0,0,12">
+                        <TextBlock TextWrapping="Wrap" Text="{loc:Translate ui.arac_paketi_ve_ekipman_galerisi}" FontFamily="{StaticResource PixelFont}" FontSize="9" FontWeight="Black" Foreground="#000000" HorizontalAlignment="Center"/>
+                        <Button Content="✕" Click="CloseSpawnModal_Click" Style="{StaticResource IconButton}" Width="26" Height="26" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                    </Grid>
+
+                    <!-- İki Sütunlu Galeri: Sol = Araç Paketi, Sağ = Ekipman/Dorse Galerisi -->
+                    <Grid Grid.Row="1">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="2*"/>
+                            <ColumnDefinition Width="14"/>
+                            <ColumnDefinition Width="1*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <!-- SOL: Araç Paketi -->
+                        <Border Grid.Column="0" Background="#EDEDF5" BorderThickness="3" BorderBrush="#000000">
+                            <DockPanel>
+                                <Border DockPanel.Dock="Top" Background="#001F5B" BorderThickness="0,0,0,3" BorderBrush="#000000" Padding="10,8">
+                                    <TextBlock TextWrapping="Wrap" Text="{loc:Translate ui.arac_paketi_butun_araclar}" FontFamily="{StaticResource PixelFont}" FontSize="8" FontWeight="Black" Foreground="#fbca1f" HorizontalAlignment="Center"/>
+                                </Border>
+                                <ScrollViewer VerticalScrollBarVisibility="Auto" Style="{StaticResource BeytriumScrollViewer}">
+                                    <StackPanel Margin="10">
+
+                                        <TextBlock Text="{loc:Translate ui.otomobiller}" FontFamily="{StaticResource PixelFont}" FontSize="10" FontWeight="Bold" Foreground="#001F5B" Margin="2,4,0,4"/>
+                                        <WrapPanel>
+                                            <Button Style="{StaticResource ModernButton}" Margin="4" Padding="6" Width="130" Height="90" Click="SpawnVehicleSelect_Click" Tag="car|sedan">
+                                                <StackPanel><Image Source="pack://siteoforigin:,,,/Assets/Vehicles/car/car_sedan.png" Stretch="Uniform" Height="42"/><TextBlock Text="{loc:Translate ui.sedan}" FontSize="10" HorizontalAlignment="Center" Margin="0,4,0,0" FontWeight="Bold" TextWrapping="Wrap"/></StackPanel>
+                                            </Button>
+                                            <Button Style="{StaticResource ModernButton}" Margin="4" Padding="6" Width="130" Height="90" Click="SpawnVehicleSelect_Click" Tag="car|sport">
+                                                <StackPanel><Image Source="pack://siteoforigin:,,,/Assets/Vehicles/car/car_sport.png" Stretch="Uniform" Height="42"/><TextBlock Text="{loc:Translate ui.spor_sedan}" FontSize="10" HorizontalAlignment="Center" Margin="0,4,0,0" FontWeight="Bold" TextWrapping="Wrap"/></StackPanel>
+                                            </Button>
+                                            <Button Style="{StaticResource ModernButton}" Margin="4" Padding="6" Width="130" Height="90" Click="SpawnVehicleSelect_Click" Tag="car|luxury">
+                                                <StackPanel><Image Source="pack://siteoforigin:,,,/Assets/Vehicles/car/car_luxury.png" Stretch="Uniform" Height="42"/><TextBlock Text="{loc:Translate ui.luks_sedan}" FontSize="10" HorizontalAlignment="Center" Margin="0,4,0,0" FontWeight="Bold" TextWrapping="Wrap"/></StackPanel>
+                                            </Button>
+                                        </WrapPanel>
+
+                                        <TextBlock Text="{loc:Translate ui.agir_vasita_cekiciler}" FontFamily="{StaticResource PixelFont}" FontSize="10" FontWeight="Bold" Foreground="#001F5B" Margin="2,10,0,4"/>
+                                        <WrapPanel>
+                                            <Button Style="{StaticResource ModernButton}" Margin="4" Padding="6" Width="130" Height="90" Click="SpawnVehicleSelect_Click" Tag="truck|hauler">
+                                                <StackPanel><Image Source="pack://siteoforigin:,,,/Assets/Vehicles/truck/truck_hauler.png" Stretch="Uniform" Height="42"/><TextBlock Text="{loc:Translate ui.uzun_yol_cekicisi}" FontSize="10" HorizontalAlignment="Center" Margin="0,4,0,0" FontWeight="Bold" TextWrapping="Wrap"/></StackPanel>
+                                            </Button>
+                                            <Button Style="{StaticResource ModernButton}" Margin="4" Padding="6" Width="130" Height="90" Click="SpawnVehicleSelect_Click" Tag="truck|rig">
+                                                <StackPanel><Image Source="pack://siteoforigin:,,,/Assets/Vehicles/truck/truck_rig.png" Stretch="Uniform" Height="42"/><TextBlock Text="{loc:Translate ui.agir_vasita_cekici}" FontSize="10" HorizontalAlignment="Center" Margin="0,4,0,0" FontWeight="Bold" TextWrapping="Wrap"/></StackPanel>
+                                            </Button>
+                                            <Button Style="{StaticResource ModernButton}" Margin="4" Padding="6" Width="130" Height="90" Click="SpawnVehicleSelect_Click" Tag="truck|freight">
+                                                <StackPanel><Image Source="pack://siteoforigin:,,,/Assets/Vehicles/truck/truck_freight.png" Stretch="Uniform" Height="42"/><TextBlock Text="{loc:Translate ui.yuk_cekicisi}" FontSize="10" HorizontalAlignment="Center" Margin="0,4,0,0" FontWeight="Bold" TextWrapping="Wrap"/></StackPanel>
+                                            </Button>
+                                        </WrapPanel>
+
+                                        <TextBlock Text="{loc:Translate ui.motosiklet_ve_bisiklet}" FontFamily="{StaticResource PixelFont}" FontSize="10" FontWeight="Bold" Foreground="#001F5B" Margin="2,10,0,4"/>
+                                        <WrapPanel>
+                                            <Button Style="{StaticResource ModernButton}" Margin="4" Padding="6" Width="130" Height="90" Click="SpawnVehicleSelect_Click" Tag="motorcycle|sport">
+                                                <StackPanel><Image Source="pack://siteoforigin:,,,/Assets/Vehicles/motorcycle/motorcycle_sport.png" Stretch="Uniform" Height="42"/><TextBlock Text="{loc:Translate ui.spor_motosiklet}" FontSize="10" HorizontalAlignment="Center" Margin="0,4,0,0" FontWeight="Bold" TextWrapping="Wrap"/></StackPanel>
+                                            </Button>
+                                            <Button Style="{StaticResource ModernButton}" Margin="4" Padding="6" Width="130" Height="90" Click="SpawnVehicleSelect_Click" Tag="motorcycle|race">
+                                                <StackPanel><Image Source="pack://siteoforigin:,,,/Assets/Vehicles/motorcycle/motorcycle_race.png" Stretch="Uniform" Height="42"/><TextBlock Text="{loc:Translate ui.yaris_motosikleti}" FontSize="10" HorizontalAlignment="Center" Margin="0,4,0,0" FontWeight="Bold" TextWrapping="Wrap"/></StackPanel>
+                                            </Button>
+                                        </WrapPanel>
+
+                                        <TextBlock Text="{loc:Translate ui.otobusler}" FontFamily="{StaticResource PixelFont}" FontSize="10" FontWeight="Bold" Foreground="#001F5B" Margin="2,10,0,4"/>
+                                        <WrapPanel>
+                                            <Button Style="{StaticResource ModernButton}" Margin="4" Padding="6" Width="130" Height="90" Click="SpawnVehicleSelect_Click" Tag="bus|coach">
+                                                <StackPanel><Image Source="pack://siteoforigin:,,,/Assets/Vehicles/bus/bus_coach.png" Stretch="Uniform" Height="42"/><TextBlock Text="{loc:Translate ui.tur_otobusu}" FontSize="10" HorizontalAlignment="Center" Margin="0,4,0,0" FontWeight="Bold" TextWrapping="Wrap"/></StackPanel>
+                                            </Button>
+                                            <Button Style="{StaticResource ModernButton}" Margin="4" Padding="6" Width="130" Height="90" Click="SpawnVehicleSelect_Click" Tag="bus|intercity">
+                                                <StackPanel><Image Source="pack://siteoforigin:,,,/Assets/Vehicles/bus/bus_intercity.png" Stretch="Uniform" Height="42"/><TextBlock Text="{loc:Translate ui.sehirlerarasi_otobus}" FontSize="10" HorizontalAlignment="Center" Margin="0,4,0,0" FontWeight="Bold" TextWrapping="Wrap"/></StackPanel>
+                                            </Button>
+                                            <Button Style="{StaticResource ModernButton}" Margin="4" Padding="6" Width="130" Height="90" Click="SpawnVehicleSelect_Click" Tag="bus|midi">
+                                                <StackPanel><Image Source="pack://siteoforigin:,,,/Assets/Vehicles/bus/bus_midi.png" Stretch="Uniform" Height="42"/><TextBlock Text="{loc:Translate ui.midibus}" FontSize="10" HorizontalAlignment="Center" Margin="0,4,0,0" FontWeight="Bold" TextWrapping="Wrap"/></StackPanel>
+                                            </Button>
+                                        </WrapPanel>
+
+                                        <TextBlock Text="{loc:Translate ui.traktorler}" FontFamily="{StaticResource PixelFont}" FontSize="10" FontWeight="Bold" Foreground="#001F5B" Margin="2,10,0,4"/>
+                                        <WrapPanel>
+                                            <Button Style="{StaticResource ModernButton}" Margin="4" Padding="6" Width="130" Height="90" Click="SpawnVehicleSelect_Click" Tag="tractor|farm">
+                                                <StackPanel><Image Source="pack://siteoforigin:,,,/Assets/Vehicles/tractor/tractor_farm.png" Stretch="Uniform" Height="42"/><TextBlock Text="{loc:Translate ui.tarim_traktoru}" FontSize="10" HorizontalAlignment="Center" Margin="0,4,0,0" FontWeight="Bold" TextWrapping="Wrap"/></StackPanel>
+                                            </Button>
+                                        </WrapPanel>
+
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </DockPanel>
+                        </Border>
+
+                        <!-- SAĞ: Ekipman ve Dorse Galerisi -->
+                        <Border Grid.Column="2" Background="#EDEDF5" BorderThickness="3" BorderBrush="#000000">
+                            <DockPanel>
+                                <Border DockPanel.Dock="Top" Background="#001F5B" BorderThickness="0,0,0,3" BorderBrush="#000000" Padding="10,8">
+                                    <TextBlock Text="{loc:Translate ui.ekipman_ve_dorse_galerisi}" FontFamily="{StaticResource PixelFont}" FontSize="10" FontWeight="Black" Foreground="#1ABCAA" HorizontalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center"/>
+                                </Border>
+                                <StackPanel Margin="10">
+                                    <TextBlock Text="{loc:Translate ui.bir_araci_ekledikten_sonra_secili_arac}" FontSize="10" Foreground="#333333" TextWrapping="Wrap" Margin="2,0,2,10"/>
+
+                                    <Border Background="#FFFFFF" BorderThickness="2" BorderBrush="#000000" Padding="8" Margin="0,0,0,8">
+                                        <StackPanel HorizontalAlignment="Center">
+                                            <Image Source="pack://siteoforigin:,,,/Assets/Vehicles/trailer/trailer_flatbed.png" Stretch="Uniform" Height="36"/>
+                                            <TextBlock Text="{loc:Translate ui.tir_dorse_1_duz_yatak}" FontSize="10" FontWeight="Black" HorizontalAlignment="Center" Margin="0,4,0,0" TextWrapping="Wrap" TextAlignment="Center"/>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Background="#FFFFFF" BorderThickness="2" BorderBrush="#000000" Padding="8" Margin="0,0,0,8">
+                                        <StackPanel HorizontalAlignment="Center">
+                                            <Image Source="pack://siteoforigin:,,,/Assets/Vehicles/trailer/trailer_tanker.png" Stretch="Uniform" Height="36"/>
+                                            <TextBlock Text="{loc:Translate ui.tir_dorse_2_sivi_tanker}" FontSize="10" FontWeight="Black" HorizontalAlignment="Center" Margin="0,4,0,0" TextWrapping="Wrap" TextAlignment="Center"/>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Background="#FFFFFF" BorderThickness="2" BorderBrush="#000000" Padding="8" Margin="0,0,0,8">
+                                        <StackPanel HorizontalAlignment="Center">
+                                            <Image Source="pack://siteoforigin:,,,/Assets/Vehicles/trailer/trailer_equipment.png" Stretch="Uniform" Height="36"/>
+                                            <TextBlock Text="{loc:Translate ui.traktor_romorku_1}" FontSize="10" FontWeight="Black" HorizontalAlignment="Center" Margin="0,4,0,0" TextWrapping="Wrap" TextAlignment="Center"/>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Background="#FFFFFF" BorderThickness="2" BorderBrush="#000000" Padding="8">
+                                        <StackPanel HorizontalAlignment="Center">
+                                            <Image Source="pack://siteoforigin:,,,/Assets/Vehicles/trailer/trailer_wagon.png" Stretch="Uniform" Height="36"/>
+                                            <TextBlock Text="{loc:Translate ui.traktor_romorku_2}" FontSize="10" FontWeight="Black" HorizontalAlignment="Center" Margin="0,4,0,0" TextWrapping="Wrap" TextAlignment="Center"/>
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+                            </DockPanel>
+                        </Border>
+                    </Grid>
+
+                    <!-- Footer / Close -->
+                    <Button Grid.Row="2" Content="{loc:Translate ui.iptal}" Click="CloseSpawnModal_Click" Style="{StaticResource ModernButton}" Width="100" HorizontalAlignment="Center" Margin="0,15,0,0"/>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- Yardım / Kısayollar Modali: her an "❓" butonuyla açılabilen kalıcı kısayol referansı -
+             önceden genel kısayollar (T/M/R/C/S/L/E/V/K/A/G) hiçbir yerde gösterilmiyordu, sadece
+             Vites panelindeki sürüşe özel kısayollar görünürdü. -->
+        <Grid Name="HelpModal" Visibility="Collapsed" Background="#90000000" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+            <!-- Kısayol listesi İngilizceye geçince okunamaz hale gelmişti. İki kök sebep vardı:
+                 (1) Gövde metinlerinde açık Foreground YOKTU; pencere kökünden BEYAZ miras alınıyor,
+                     krem (#FFFFCC) zeminde görünmez oluyordu.
+                 (2) Pencere kökündeki TextElement.FontFamily mirası "Press Start 2P" pixel fontu;
+                     bu font çok geniş ve satır kutusu glif yüksekliğinden dar olduğundan, uzun
+                     İngilizce satırlar sarınca ALT ALTA BİNİYORDU.
+                 Çözüm: gövde metinleri artık koyu renkli, okunaklı bir sistem fontuyla ve GARANTİ
+                 satır yüksekliğiyle (LineHeight + BlockLineHeight) çiziliyor; kutu da uzun çeviriler
+                 için genişletildi. Başlıklar pixel fontunu koruyor (tasarım dili bozulmasın). -->
+            <Border Name="HelpModalBox" Width="560" Height="560" Background="#FFFFCC" CornerRadius="0" BorderThickness="4" BorderBrush="#000000" Padding="20" HorizontalAlignment="Center" VerticalAlignment="Center">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="0" ShadowDepth="8" Opacity="1" Color="#000000" Direction="315"/>
+                </Border.Effect>
+                <Grid>
+                    <Grid.Resources>
+                        <!-- Kısayol satırlarının ortak stili: koyu renk (kontrast), okunaklı font ve
+                             sarma durumunda bile sabit satır aralığı (satır yüksekliği kuralı
+                             Styles.xaml'deki GuaranteedLineHeight'tan gelir). -->
+                        <Style x:Key="HelpLine" TargetType="TextBlock" BasedOn="{StaticResource GuaranteedLineHeight}">
+                            <Setter Property="FontFamily" Value="Segoe UI, Arial"/>
+                            <Setter Property="FontSize" Value="13"/>
+                            <Setter Property="FontWeight" Value="SemiBold"/>
+                            <Setter Property="Foreground" Value="#111827"/>
+                            <Setter Property="TextWrapping" Value="Wrap"/>
+                            <Setter Property="Margin" Value="0,0,0,7"/>
+                        </Style>
+                    </Grid.Resources>
+
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <Grid Grid.Row="0" Margin="0,0,0,12">
+                        <TextBlock Text="{loc:Translate ui.kisayollar}" FontFamily="{StaticResource PixelFont}" FontSize="10" FontWeight="Black" Foreground="#000000" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <!-- Dil geçiş butonu: karşı dilin adını gösterir, tıklanınca arayüzün
+                             tamamı yeniden başlatma olmadan anında o dile geçer. -->
+                        <Button Name="HelpLanguageToggleBtn" Click="HelpLanguageToggle_Click" Style="{StaticResource ModernButton}"
+                                Height="26" Padding="10,0" FontSize="11" HorizontalAlignment="Left" VerticalAlignment="Center"
+                                ToolTip="{loc:Translate ui.arayuz_dilini_degistir}" AutomationProperties.Name="{loc:Translate ui.dil}"/>
+                        <Button Content="✕" Click="CloseHelpModal_Click" Style="{StaticResource IconButton}" Width="24" Height="24" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                    </Grid>
+
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Style="{StaticResource BeytriumScrollViewer}">
+                        <StackPanel Margin="4,0,10,0">
+                            <TextBlock Text="{loc:Translate ui.genel}" FontFamily="{StaticResource PixelFont}" FontSize="9" FontWeight="Bold" Foreground="#001F5B" Margin="0,0,0,8"/>
+                            <TextBlock Text="{loc:Translate ui.r_arac_ekle_c_temizle_delete}" Style="{StaticResource HelpLine}"/>
+                            <TextBlock Text="{loc:Translate ui.ctrls_kaydet_l_yukle_e_eklentiler}" Style="{StaticResource HelpLine}"/>
+                            <TextBlock Text="{loc:Translate ui.q_secili_araci_imlece_cagir}" Style="{StaticResource HelpLine}"/>
+                            <TextBlock Text="{loc:Translate ui.t_tema_degistir_m_ses_ac}" Style="{StaticResource HelpLine}"/>
+                            <TextBlock Text="{loc:Translate ui.a_otomatik_hareket_ac_kapa_g}" Style="{StaticResource HelpLine}"/>
+                            <TextBlock Text="{loc:Translate ui.v_ucus_modu_secili_arac_k}" Style="{StaticResource HelpLine}"/>
+                            <TextBlock Text="{loc:Translate ui.p_duraklat_w_basilisurt_arac_yika}" Style="{StaticResource HelpLine}"/>
+                            <TextBlock Text="{loc:Translate ui.shifttik_secili_arac_lar_a_rota}" Style="{StaticResource HelpLine}" Margin="0,0,0,14"/>
+
+                            <TextBlock Text="{loc:Translate ui.surus_modu}" FontFamily="{StaticResource PixelFont}" FontSize="9" FontWeight="Bold" Foreground="#001F5B" Margin="0,0,0,8"/>
+                            <TextBlock Text="{loc:Translate ui.bosluk_surus_modunu_ac_kapa}" Style="{StaticResource HelpLine}"/>
+                            <TextBlock Text="{loc:Translate ui.wasd_ok_tuslari_sur_fren}" Style="{StaticResource HelpLine}"/>
+                            <TextBlock Text="{loc:Translate ui.0_9_vites_sec_x_range}" Style="{StaticResource HelpLine}"/>
+                            <TextBlock Text="{loc:Translate ui.tab_surulen_araci_degistir}" Style="{StaticResource HelpLine}"/>
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <Button Grid.Row="2" Content="{loc:Translate ui.kapat}" Click="CloseHelpModal_Click" Style="{StaticResource ModernButton}" Width="100" HorizontalAlignment="Center" Margin="0,15,0,0"/>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- Kayıt Listesi Modali (Save List) -->
+        <Grid Name="SaveListModal" Visibility="Collapsed" Background="#90000000" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+            <Border Name="SaveListModalBox" Width="480" Height="420" Background="#FFFFCC" CornerRadius="0" BorderThickness="4" BorderBrush="#000000" Padding="20" HorizontalAlignment="Center" VerticalAlignment="Center">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="0" ShadowDepth="8" Opacity="1" Color="#000000" Direction="315"/>
+                </Border.Effect>
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <Grid Grid.Row="0" Margin="0,0,0,12">
+                        <TextBlock Text="{loc:Translate ui.kayitlar}" FontFamily="{StaticResource PixelFont}" FontSize="10" FontWeight="Black" Foreground="#000000" HorizontalAlignment="Center"/>
+                        <Button Content="✕" Click="CloseSaveListModal_Click" Style="{StaticResource IconButton}" Width="24" Height="24" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                    </Grid>
+
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Style="{StaticResource BeytriumScrollViewer}">
+                        <ItemsControl Name="SaveListControl">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Background="#12233F" BorderThickness="2" BorderBrush="#000000" Padding="10" Margin="0,0,0,8">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Grid.Column="0">
+                                                <TextBlock Text="{Binding Name}" FontSize="9" FontWeight="Bold" Foreground="#FFFFFF"/>
+                                                <TextBlock Text="{Binding Timestamp, StringFormat='dd.MM.yyyy HH:mm:ss'}" FontSize="10" Foreground="#C9D6E8" Margin="0,2,0,0"/>
+                                                <TextBlock Text="{Binding VehicleCount, StringFormat='🚗 {0} araç'}" FontSize="10" Foreground="#95E1D3" Margin="0,2,0,0"/>
+                                            </StackPanel>
+                                            <Button Grid.Column="1" Content="📂" Tag="{Binding Name}" Click="LoadSaveRow_Click" Style="{StaticResource IconButton}" Width="30" Height="30" Margin="4,0" ToolTip="{loc:Translate ui.bu_kaydi_yukle}" AutomationProperties.Name="{loc:Translate ui.bu_kaydi_yukle}"/>
+                                            <Button Grid.Column="2" Content="🗑" Tag="{Binding Name}" Click="DeleteSaveRow_Click" Style="{StaticResource IconButtonClose}" Width="30" Height="30" ToolTip="{loc:Translate ui.bu_kaydi_sil}" AutomationProperties.Name="{loc:Translate ui.bu_kaydi_sil}"/>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+
+                    <Button Grid.Row="2" Content="{loc:Translate ui.kapat}" Click="CloseSaveListModal_Click" Style="{StaticResource ModernButton}" Width="100" HorizontalAlignment="Center" Margin="0,15,0,0"/>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- Özel Sorgu ve Mesaj Modali (Custom Dialog Overlay) -->
+        <Grid Name="CustomDialogOverlay" Visibility="Collapsed" Background="#90000000" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+            <Border Name="CustomDialogBox" Width="400" HorizontalAlignment="Center" VerticalAlignment="Center"
+                    Background="#FFFFCC" BorderThickness="4" BorderBrush="#000000" Padding="20">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="0" ShadowDepth="8" Opacity="1" Color="#000000" Direction="315"/>
+                </Border.Effect>
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Title Bar -->
+                    <Border Grid.Row="0" Background="#fbca1f" BorderThickness="0,0,0,4" BorderBrush="#000000" Margin="-20,-20,-20,15" Padding="15,10">
+                        <TextBlock Name="CustomDialogTitle" Text="{loc:Translate ui.sorgu_mesaj}" FontFamily="Oswald, Impact, Arial Black, Segoe UI, Segoe UI Emoji" FontSize="16" FontWeight="Black" Foreground="#000000"/>
+                    </Border>
+
+                    <!-- Message Body -->
+                    <TextBlock Name="CustomDialogMessage" Grid.Row="1" Text="{loc:Translate ui.buraya_mesaj_icerigi_gelecek}" Foreground="#000000" FontSize="10" FontWeight="Bold" TextWrapping="Wrap" Margin="0,10,0,20"/>
+
+                    <!-- Action Buttons -->
+                    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right">
+                        <Button Name="CustomDialogYesBtn" Content="{loc:Translate ui.evet}" Click="CustomDialogYes_Click" Style="{StaticResource ModernButton}" Background="#fbca1f" Width="100" Margin="0,0,10,0"/>
+                        <Button Name="CustomDialogNoBtn" Content="{loc:Translate ui.hayir}" Click="CustomDialogNo_Click" Style="{StaticResource ModernButton}" Background="#1ABCAA" Width="100" Margin="0,0,10,0"/>
+                        <Button Name="CustomDialogOkBtn" Content="{loc:Translate ui.tamam}" Click="CustomDialogOk_Click" Style="{StaticResource ModernButton}" Background="#fbca1f" Width="100"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
+</Window>
