@@ -6,7 +6,6 @@
 
 **Masaüstünde yaşayan minyatür araçlar — Windows için şeffaf, fizik tabanlı bir "desktop pet" simülatörü.**
 
-[![CI](https://github.com/yagizturkmen-ceng/automotion/actions/workflows/ci.yml/badge.svg)](https://github.com/yagizturkmen-ceng/automotion/actions/workflows/ci.yml)
 ![.NET](https://img.shields.io/badge/.NET-9.0-512BD4?logo=dotnet&logoColor=white)
 ![WPF](https://img.shields.io/badge/UI-WPF-0C54C2)
 ![C#](https://img.shields.io/badge/C%23-239120?logo=csharp&logoColor=white)
