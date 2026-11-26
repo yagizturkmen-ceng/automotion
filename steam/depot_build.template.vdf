@@ -1,0 +1,16 @@
+"DepotBuildConfig"
+{
+	"DepotID" "{{DEPOTID}}"
+
+	"FileMapping"
+	{
+		"LocalPath" "*"
+		"DepotPath" "."
+		"recursive" "1"
+	}
+
+	// csproj zaten disarida birakiyor; burada ikinci bir emniyet kemeri.
+	// steam_appid.txt paketteyse Steam uzerinden baslatilan surumde sahiplik kontrolu atlanabilir.
+	"FileExclusion" "steam_appid.txt"
+	"FileExclusion" "*.pdb"
+}

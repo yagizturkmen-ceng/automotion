@@ -28,7 +28,7 @@ namespace AutoMotion.Services
 
         /// <summary>Uygulamanın desteklediği diller (kod → arayüzde gösterilecek ad).</summary>
         public static readonly IReadOnlyList<(string Code, string DisplayName)> SupportedLanguages =
-            new[] { ("tr", "Türkçe"), ("en", "English") };
+            new[] { ("tr", "Türkçe"), ("en", "English"), ("de", "Deutsch") };
 
         public const string FallbackLanguage = "en";
 
@@ -63,6 +63,24 @@ namespace AutoMotion.Services
             if (self._current.TryGetValue(key, out var value)) return value;
             if (self._fallback.TryGetValue(key, out var fallback)) return fallback;
             return key;
+        }
+
+        /// <summary>
+        /// Model katmanı için: anahtar geçerli dilde ya da yedek dilde varsa çevirisini, yoksa
+        /// verilen <paramref name="fallback"/> metnini döndürür (anahtarın kendisini DEĞİL).
+        ///
+        /// Neden ayrı: öğe/araç/eklenti adları sözlük yüklenmeden de anlamlı kalmalı - testler ve
+        /// sözlüğün henüz yüklenmediği erken açılış anında arayüzde "item.fuel.regular" gibi ham
+        /// anahtar yerine bilinen Türkçe ad görünür.
+        /// </summary>
+        public static string TOrDefault(string key, string fallback)
+        {
+            if (string.IsNullOrEmpty(key)) return fallback ?? "";
+            var self = Instance;
+
+            if (self._current.TryGetValue(key, out var value)) return value;
+            if (self._fallback.TryGetValue(key, out var fb)) return fb;
+            return fallback ?? key;
         }
 
         /// <summary>Biçimlendirilmiş çeviri: <c>T("toast.fuel_empty", vehicleName)</c>.

@@ -12,6 +12,21 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <ApplicationIcon>Assets\logo.ico</ApplicationIcon>
+
+    <!-- Ürün kimliği: exe'nin Özellikler > Ayrıntılar sekmesinde, Steam/Windows hata raporlarında ve
+         Görev Yöneticisi'nde görünen bilgiler. Eskiden hiçbiri tanımlı değildi (dosya sürümü 1.0.0.0,
+         ürün adı/telif boş görünüyordu). Sürüm yükseltirken yalnızca <Version> değiştirilir. -->
+    <Product>AutoMotion</Product>
+    <AssemblyTitle>AutoMotion - Virtual Vehicle Simulator</AssemblyTitle>
+    <Description>Şeffaf pencereli masaüstü sanal araç simülatörü</Description>
+    <Authors>Yağız</Authors>
+    <Company>Yağız</Company>
+    <Copyright>© 2026 Yağız</Copyright>
+    <Version>1.0.0</Version>
+    <!-- Arayüz dilleri: Türkçe, İngilizce, Almanca (bkz. Loc.SupportedLanguages). Self-contained pakete
+         WPF/WinForms çerçevesinin 13 dildeki hata/diyalog çevirileri (cs/, ja/, zh-Hans/...) kopyalanıyordu;
+         yalnızca desteklenen diller kalsın. Yeni dil eklenince buraya da eklenmeli. -->
+    <SatelliteResourceLanguages>en;tr;de</SatelliteResourceLanguages>
   </PropertyGroup>
 
   <!-- YAYIN AYARLARI - yalnızca `dotnet publish` sırasında geçerli (_IsPublishing).
@@ -33,6 +48,14 @@
     <PublishTrimmed>false</PublishTrimmed>
     <DebugType>none</DebugType> <!-- yayın paketinde *.pdb olmasın (bkz. kalan işler listesi) -->
   </PropertyGroup>
+
+  <!-- MainWindow'un partial dosyaları (MainWindow.Input.cs, MainWindow.Panels.cs...) Solution
+       Explorer'da MainWindow.xaml altında gruplansın. Yalnızca görünümü etkiler, derlemeyi değil. -->
+  <ItemGroup>
+    <Compile Update="MainWindow.*.cs">
+      <DependentUpon>MainWindow.xaml</DependentUpon>
+    </Compile>
+  </ItemGroup>
 
   <ItemGroup>
     <Resource Include="Assets\logo.png" />
@@ -61,6 +84,15 @@
        düzeltmesi ya da yeni bir dil eklemek için yeniden derleme gerekmesin (bkz. Services/Localization.cs). -->
   <ItemGroup>
     <Content Include="Assets\Lang\*.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <!-- Üçüncü taraf lisans bildirimleri (NAudio, MQTTnet, Steamworks.NET: MIT; Press Start 2P: SIL OFL
+       1.1). MIT ve özellikle OFL, bileşen dağıtılırken lisans metninin de birlikte verilmesini ŞART
+       koşar; eskiden yayın paketinde hiçbir lisans metni yoktu. Exe'nin yanına kopyalanır. -->
+  <ItemGroup>
+    <Content Include="THIRD_PARTY_NOTICES.txt">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>

@@ -114,6 +114,8 @@ public class VehicleVisualsTests
         vehicle.Deserialize(new AutoMotionData { Type = "truck", Brand = "scania", Scale = 1.0 });
 
         Assert.Equal("rig", vehicle.Brand);
-        Assert.Equal("Ağır Vasıta Çekici", vehicle.DisplayModel);
+        // Görünen ad artık dile göre çözülüyor; burada önemli olan eski anahtarın DOĞRU varyanta
+        // (dolayısıyla onun adına) çözülmesi - metnin kendisi dil testlerinde doğrulanıyor.
+        Assert.Equal(VehicleVisuals.Get("truck", "rig").Label, vehicle.DisplayModel);
     }
 }

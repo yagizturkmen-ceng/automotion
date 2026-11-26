@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using AutoMotion.Models;
 using AutoMotion.Services;
 
 namespace AutoMotion.Tests;
@@ -17,17 +18,7 @@ namespace AutoMotion.Tests;
 /// </summary>
 public class LocalizationTests
 {
-    private static string ProjectDir
-    {
-        get
-        {
-            var dir = new DirectoryInfo(AppContext.BaseDirectory);
-            while (dir != null && !Directory.Exists(Path.Combine(dir.FullName, "AutoMotion", "Assets", "Lang")))
-                dir = dir.Parent;
-            Assert.NotNull(dir);
-            return Path.Combine(dir.FullName, "AutoMotion");
-        }
-    }
+    private static string ProjectDir => TestPaths.AppDir;
 
     private static Dictionary<string, string> LoadLang(string code)
     {
@@ -43,20 +34,25 @@ public class LocalizationTests
     [Fact]
     public void EveryLanguage_HasExactlyTheSameKeys()
     {
-        var tr = LoadLang("tr");
+        // Referans İngilizce (yedek dil). Desteklenen her dil - yeni eklenenler dahil, listeye
+        // eklendiği anda - aynı anahtar setine sahip olmalı.
         var en = LoadLang("en");
 
-        var missingInEn = tr.Keys.Except(en.Keys).OrderBy(k => k).ToList();
-        var missingInTr = en.Keys.Except(tr.Keys).OrderBy(k => k).ToList();
+        foreach (var (code, _) in Loc.SupportedLanguages)
+        {
+            var lang = LoadLang(code);
+            var missing = en.Keys.Except(lang.Keys).OrderBy(k => k).ToList();
+            var extra = lang.Keys.Except(en.Keys).OrderBy(k => k).ToList();
 
-        Assert.True(missingInEn.Count == 0, "İngilizcede eksik: " + string.Join(", ", missingInEn));
-        Assert.True(missingInTr.Count == 0, "Türkçede eksik: " + string.Join(", ", missingInTr));
+            Assert.True(missing.Count == 0, code + ".json'da eksik: " + string.Join(", ", missing));
+            Assert.True(extra.Count == 0, code + ".json'da fazla: " + string.Join(", ", extra));
+        }
     }
 
     [Fact]
     public void NoTranslationValue_IsEmpty()
     {
-        foreach (var code in new[] { "tr", "en" })
+        foreach (var (code, _) in Loc.SupportedLanguages)
             foreach (var pair in LoadLang(code))
                 Assert.False(string.IsNullOrWhiteSpace(pair.Value),
                     code + ".json içindeki '" + pair.Key + "' boş.");
@@ -69,7 +65,7 @@ public class LocalizationTests
     {
         string[] entities = { "&amp;", "&lt;", "&gt;", "&quot;" };
 
-        foreach (var code in new[] { "tr", "en" })
+        foreach (var (code, _) in Loc.SupportedLanguages)
             foreach (var pair in LoadLang(code))
                 foreach (var entity in entities)
                     Assert.False(pair.Value.Contains(entity),
@@ -81,17 +77,19 @@ public class LocalizationTests
     [Fact]
     public void FormatPlaceholders_MatchAcrossLanguages()
     {
-        var tr = LoadLang("tr");
         var en = LoadLang("en");
         var rx = new Regex(@"\{(\d+)\}");
 
-        foreach (var pair in tr)
+        foreach (var (code, _) in Loc.SupportedLanguages)
         {
-            var trSlots = rx.Matches(pair.Value).Select(m => m.Value).OrderBy(s => s).ToList();
-            var enSlots = rx.Matches(en[pair.Key]).Select(m => m.Value).OrderBy(s => s).ToList();
-            Assert.True(trSlots.SequenceEqual(enSlots),
-                "'" + pair.Key + "' yer tutucuları uyuşmuyor: tr=" + string.Join(",", trSlots)
-                + " en=" + string.Join(",", enSlots));
+            foreach (var pair in LoadLang(code))
+            {
+                var slots = rx.Matches(pair.Value).Select(m => m.Value).OrderBy(s => s).ToList();
+                var enSlots = rx.Matches(en[pair.Key]).Select(m => m.Value).OrderBy(s => s).ToList();
+                Assert.True(slots.SequenceEqual(enSlots),
+                    "'" + pair.Key + "' yer tutucuları uyuşmuyor: " + code + "=" + string.Join(",", slots)
+                    + " en=" + string.Join(",", enSlots));
+            }
         }
     }
 
@@ -137,13 +135,24 @@ public class LocalizationTests
     /// karışmış Türkçe bir bildirim görür. Tarama yalnızca kullanıcıya görünen çağrı/atama
     /// kalıplarına bakar (bildirim, diyalog, kontrol metni, tepsi menüsü); yorumlar ve iç
     /// mantık dizeleri kapsam dışıdır.
+    ///
+    /// Kapsam genişletildi: eski desen yalnızca <c>x.ToolTip = "..."</c> gibi TEK satırlık
+    /// atamaları yakalıyordu; şu kalıplar gözden kaçıyor ve kodda ~30 sabit Türkçe metin birikmişti:
+    /// nesne başlatıcıları (<c>new MenuItem { Header = "..." }</c>), koşul ifadesinin alt satıra
+    /// taştığı atamalar (<c>? "..." : "..."</c>), switch kolları (<c>true => "..."</c>), birden çok
+    /// satıra yayılan çağrı argümanları ve dialog Title/Filter alanları. Bilerek kullanıcıya
+    /// gösterilmeyen bir dize (ör. yalnızca log'a yazılan) satır sonuna <c>// loc:ignore</c> ile
+    /// işaretlenebilir.
     /// </summary>
     [Fact]
     public void NoUserFacingTurkishStringsRemain_HardcodedInCode()
     {
         const string turkishOnly = "çğıöşüÇĞİÖŞÜ";
+        var userFacingCall = new Regex(@"\b(ShowToast|ShowDialogAsync|MessageBox\.Show)\(");
         var userFacing = new Regex(
-            @"\b(ShowToast|ShowDialogAsync|MessageBox\.Show)\(|\.(Text|Content|ToolTip|Header)\s*=\s*\$?""");
+            @"\b(Text|Content|ToolTip|Header|Title|Filter|StatusLabel)\s*=>?\s*"   // atama / başlatıcı / ifade gövdesi
+            + @"|^[?:]\s*\$?"""                                                     // alt satıra taşan koşul kolu
+            + @"|=>\s*\$?""");                                                      // switch kolu
         var stringLiteral = new Regex(@"""(?:[^""\\]|\\.)*""");
 
         string objDir = Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar;
@@ -158,6 +167,7 @@ public class LocalizationTests
 
             var lines = File.ReadAllLines(file);
             bool inBlockComment = false;
+            int openCallDepth = 0; // çok satırlı ShowToast(/ShowDialogAsync( argümanlarını izlemek için
 
             for (int i = 0; i < lines.Length; i++)
             {
@@ -178,9 +188,20 @@ public class LocalizationTests
                     line = line.Substring(0, open);
                 }
 
+                if (line.Contains("loc:ignore", StringComparison.Ordinal)) continue;
                 line = StripLineComment(line).Trim();
                 if (line.Length == 0 || line.StartsWith("///", StringComparison.Ordinal)) continue;
-                if (!userFacing.IsMatch(line)) continue;
+
+                bool continuesCall = openCallDepth > 0;
+                bool startsCall = userFacingCall.IsMatch(line);
+                if (continuesCall || startsCall)
+                {
+                    string noStrings = stringLiteral.Replace(line, "");
+                    openCallDepth += noStrings.Count(c => c == '(') - noStrings.Count(c => c == ')');
+                    if (openCallDepth < 0) openCallDepth = 0;
+                }
+
+                if (!continuesCall && !startsCall && !userFacing.IsMatch(line)) continue;
 
                 foreach (Match m in stringLiteral.Matches(line))
                 {
@@ -291,7 +312,8 @@ public class LocalizationTests
     [InlineData("tr", true)]
     [InlineData("en", true)]
     [InlineData("EN", true)]
-    [InlineData("de", false)]
+    [InlineData("de", true)]
+    [InlineData("fr", false)]
     [InlineData("", false)]
     public void IsSupported_RecognisesOnlyShippedLanguages(string code, bool expected)
     {
@@ -302,5 +324,91 @@ public class LocalizationTests
     public void IsSupported_ReturnsFalseForNull()
     {
         Assert.False(Loc.IsSupported(null));
+    }
+
+    // ------------------------------------------------------------------ model katmanı adları
+    // Bu testler Loc'un paylaşılan durumunu değiştirdiği için bilerek BU sınıfta duruyor: xUnit
+    // aynı sınıfın testlerini sırayla koşturur, başka sınıflarla yarışa girmezler.
+
+    [Fact]
+    public void TOrDefault_ReturnsTranslation_ThenFallbackText_NeverRawKey()
+    {
+        Loc.Instance.LoadForTest("en", new Dictionary<string, string> { ["x.var"] = "Exists" }, null);
+
+        Assert.Equal("Exists", Loc.TOrDefault("x.var", "Yedek"));
+        Assert.Equal("Yedek", Loc.TOrDefault("x.yok", "Yedek"));
+        Assert.Equal("Yedek", Loc.TOrDefault("", "Yedek"));
+    }
+
+    /// <summary>Öğe adları kayıt dosyasına yazılmaz (yalnızca tür/alt tür) ve her okunuşta
+    /// sözlükten çözülür - dil değişince envanterdeki mevcut öğeler de yeni dile geçmeli.</summary>
+    [Fact]
+    public void ItemNames_FollowLanguage_AndFallBackToTurkish()
+    {
+        var fuel = new Fuel("premium");
+
+        Loc.Instance.LoadForTest("en", new Dictionary<string, string>
+        {
+            ["item.fuel.premium"] = "Premium Fuel",
+            ["item.fuel.premium.desc"] = "{0} fuel units"
+        }, null);
+        Assert.Equal("Premium Fuel", fuel.Name);
+        Assert.Equal("100 fuel units", fuel.Description);
+
+        Loc.Instance.LoadForTest("tr", new Dictionary<string, string>(), null);
+        Assert.Equal("🏁 Premium Yakıt", fuel.Name);
+        Assert.Equal("100 yakıt birimi", fuel.Description);
+    }
+
+    [Fact]
+    public void UpgradeDescription_NoLongerShowsInternalEffectId()
+    {
+        Loc.Instance.LoadForTest("tr", new Dictionary<string, string>(), null);
+        var upgrade = new Upgrade("speed");
+
+        Assert.DoesNotContain("speed", upgrade.Description);
+        Assert.Contains("20", upgrade.Description);
+    }
+
+    [Fact]
+    public void VehicleModelAndTrailerLabels_AreLocalized()
+    {
+        Loc.Instance.LoadForTest("en", new Dictionary<string, string>
+        {
+            ["vehicle.model.truck.rig"] = "Heavy-Duty Tractor",
+            ["trailer.tanker"] = "Tanker Trailer",
+            ["vehicle.type.helicopter"] = "Helicopter"
+        }, null);
+
+        Assert.Equal("Heavy-Duty Tractor", VehicleVisuals.Get("truck", "rig").Label);
+        Assert.Equal("Tanker Trailer", Vehicle.TrailerLabel("tanker"));
+        Assert.Equal("Helicopter", new Vehicle(0, 0, "helicopter").DisplayModel);
+
+        Loc.Instance.LoadForTest("tr", new Dictionary<string, string>(), null);
+        Assert.Equal("Ağır Vasıta Çekici", VehicleVisuals.Get("truck", "rig").Label);
+        Assert.Equal("Tanker Dorse", Vehicle.TrailerLabel("tanker"));
+    }
+
+    /// <summary>Koddaki her model anahtarı iki dil dosyasında da bulunmalı - aksi halde İngilizce
+    /// arayüzde sessizce Türkçe yedek metin görünür.</summary>
+    [Fact]
+    public void ModelKeys_ExistInBothLanguageFiles()
+    {
+        var tr = LoadLang("tr");
+        var en = LoadLang("en");
+        var keys = new List<string>();
+
+        foreach (var type in new[] { "car", "truck", "bus", "motorcycle", "tractor" })
+            foreach (var brand in VehicleVisuals.BrandsFor(type))
+                keys.Add($"vehicle.model.{type}.{brand}");
+        foreach (var trailer in Vehicle.TrailerCatalog.Keys) keys.Add($"trailer.{trailer}");
+        foreach (var sub in new[] { "regular", "premium", "turbo" }) { keys.Add($"item.fuel.{sub}"); keys.Add($"item.fuel.{sub}.desc"); }
+        foreach (var sub in new[] { "standard", "advanced", "full" }) { keys.Add($"item.repair.{sub}"); keys.Add($"item.repair.{sub}.desc"); }
+        foreach (var sub in new[] { "speed", "acceleration", "efficiency", "durability" }) { keys.Add($"item.upgrade.{sub}"); keys.Add($"item.upgrade.{sub}.desc"); }
+        foreach (var sub in new[] { "paint", "sticker", "spoiler", "lights" }) { keys.Add($"item.decoration.{sub}"); keys.Add($"item.decoration.{sub}.desc"); }
+        foreach (var id in new[] { "mission", "economy", "traffic" }) { keys.Add($"expansion.{id}.name"); keys.Add($"expansion.{id}.desc"); }
+
+        var missing = keys.Where(k => !tr.ContainsKey(k) || !en.ContainsKey(k)).ToList();
+        Assert.True(missing.Count == 0, "Dil dosyalarında eksik model anahtarları: " + string.Join(", ", missing));
     }
 }

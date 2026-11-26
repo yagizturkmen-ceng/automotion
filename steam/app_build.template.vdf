@@ -1,0 +1,18 @@
+"AppBuild"
+{
+	"AppID" "{{APPID}}"
+	"Desc" "{{DESC}}"
+
+	// yayinla.ps1 bu dosyayi kopyalayip {{...}} alanlarini doldurur; elle de kullanilabilir.
+	"ContentRoot" "{{CONTENTROOT}}"
+	"BuildOutput" ".\output\"
+
+	// Bos birakilirsa yukleme varsayilan (default) dala gider ama CANLIYA ALINMAZ;
+	// Steamworks panelinden elle "Set build live" yapilir. Guvenli varsayilan budur.
+	"SetLive" ""
+
+	"Depots"
+	{
+		"{{DEPOTID}}" "depot_build.vdf"
+	}
+}

@@ -9,8 +9,34 @@ namespace AutoMotion.Models
     public abstract class Item
     {
         public string ItemType { get; protected set; }
-        public string Name { get; protected set; }
-        public string Description { get; protected set; }
+        // Ad ve açıklama her okunuşta sözlükten çözülür (dil değişince envanter listesi de
+        // değişsin). Alt sınıflar yalnızca anahtarı ve Türkçe yedeği bildirir (bkz. SetText).
+        private string nameKey = "", nameFallback = "", descKey = "", descFallback = "";
+        private object[] descArgs = Array.Empty<object>();
+
+        public string Name => Services.Loc.TOrDefault(nameKey, nameFallback);
+
+        public string Description
+        {
+            get
+            {
+                string format = Services.Loc.TOrDefault(descKey, descFallback);
+                if (descArgs.Length == 0) return format;
+                try { return string.Format(System.Globalization.CultureInfo.CurrentCulture, format, descArgs); }
+                catch (FormatException) { return format; }
+            }
+        }
+
+        /// <summary>Öğenin görünen metinlerini anahtar + Türkçe yedek olarak tanımlar.
+        /// Anahtarlar: item.&lt;tür&gt;.&lt;alt tür&gt; ve item.&lt;tür&gt;.&lt;alt tür&gt;.desc</summary>
+        protected void SetText(string key, string name, string description, params object[] args)
+        {
+            nameKey = key;
+            nameFallback = name ?? "";
+            descKey = key + ".desc";
+            descFallback = description ?? "";
+            descArgs = args ?? Array.Empty<object>();
+        }
         public string Icon { get; protected set; }
         public int Quantity { get; set; } = 1;
 
@@ -21,8 +47,8 @@ namespace AutoMotion.Models
         protected Item(string itemType, string name, string description, string icon)
         {
             ItemType = itemType;
-            Name = name;
-            Description = description;
+            nameFallback = name ?? "";
+            descFallback = description ?? "";
             Icon = icon;
         }
 
@@ -59,11 +85,10 @@ namespace AutoMotion.Models
             if (fuelTypes.TryGetValue(fuelType, out var config))
             {
                 FuelType = fuelType;
-                Name = config.name;
+                SetText($"item.fuel.{fuelType}", config.name, "{0} yakıt birimi", config.amount);
                 Icon = config.icon;
                 FuelAmount = config.amount;
                 Cost = config.cost;
-                Description = $"{config.amount} yakıt birimi";
             }
         }
 
@@ -104,11 +129,10 @@ namespace AutoMotion.Models
             if (repairTypes.TryGetValue(repairType, out var config))
             {
                 RepairType = repairType;
-                Name = config.name;
+                SetText($"item.repair.{repairType}", config.name, "{0} HP tamir", config.heal);
                 Icon = config.icon;
                 HealAmount = config.heal;
                 Cost = config.cost;
-                Description = $"{config.heal} HP tamir";
             }
         }
 
@@ -154,21 +178,22 @@ namespace AutoMotion.Models
         {
             var upgradeTypes = new Dictionary<string, (string name, string icon, string effect, double bonus, int cost)>
             {
-                { "speed", ("🚀 Hız Upgradı", "🚀", "speed", 0.2, 100) },
-                { "acceleration", ("⚡ Hızlanma Upgradı", "⚡", "acceleration", 0.15, 80) },
-                { "efficiency", ("💚 Verimlilik Upgradı", "💚", "efficiency", 0.25, 60) },
-                { "durability", ("💪 Dayanıklılık Upgradı", "💪", "durability", 0.3, 90) }
+                { "speed", ("🚀 Hız Yükseltmesi", "🚀", "speed", 0.2, 100) },
+                { "acceleration", ("⚡ Hızlanma Yükseltmesi", "⚡", "acceleration", 0.15, 80) },
+                { "efficiency", ("💚 Verimlilik Yükseltmesi", "💚", "efficiency", 0.25, 60) },
+                { "durability", ("💪 Dayanıklılık Yükseltmesi", "💪", "durability", 0.3, 90) }
             };
 
             if (upgradeTypes.TryGetValue(upgradeType, out var config))
             {
                 UpgradeType = upgradeType;
-                Name = config.name;
+                // Açıklama eskiden iç efekt kimliğini ("speed +20%") doğrudan gösteriyordu - Türkçe
+                // arayüzde İngilizce bir teknik kelime. Artık her yükseltmenin kendi metni var.
+                SetText($"item.upgrade.{upgradeType}", config.name, "+%{0}", (int)Math.Round(config.bonus * 100));
                 Icon = config.icon;
                 Effect = config.effect;
                 Bonus = config.bonus;
                 Cost = config.cost;
-                Description = $"{config.effect} +{(config.bonus * 100):F0}%";
             }
         }
 
@@ -218,7 +243,7 @@ namespace AutoMotion.Models
             var decorationTypes = new Dictionary<string, (string name, string icon, int cost)>
             {
                 { "paint", ("🎨 Boya", "🎨", 20) },
-                { "sticker", ("✨ Sticker", "✨", 15) },
+                { "sticker", ("✨ Çıkartma", "✨", 15) },
                 { "spoiler", ("🏎️ Spoiler", "🏎️", 50) },
                 { "lights", ("💡 LED Işık", "💡", 40) }
             };
@@ -226,10 +251,9 @@ namespace AutoMotion.Models
             if (decorationTypes.TryGetValue(decorationType, out var config))
             {
                 DecorationType = decorationType;
-                Name = config.name;
+                SetText($"item.decoration.{decorationType}", config.name, "Görünüş iyileştirmesi");
                 Icon = config.icon;
                 Cost = config.cost;
-                Description = "Görünüş iyileştirmesi";
             }
         }
 

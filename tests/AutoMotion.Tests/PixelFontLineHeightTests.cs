@@ -26,17 +26,7 @@ namespace AutoMotion.Tests;
 /// </summary>
 public class PixelFontLineHeightTests
 {
-    private static string ProjectDir
-    {
-        get
-        {
-            var dir = new DirectoryInfo(AppContext.BaseDirectory);
-            while (dir != null && !Directory.Exists(Path.Combine(dir.FullName, "AutoMotion", "Assets", "Lang")))
-                dir = dir.Parent;
-            Assert.NotNull(dir);
-            return Path.Combine(dir!.FullName, "AutoMotion");
-        }
-    }
+    private static string ProjectDir => TestPaths.AppDir;
 
     // ------------------------------------------------------------------ font metrikleri
 

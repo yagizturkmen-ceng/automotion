@@ -173,11 +173,14 @@
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <StackPanel Orientation="Horizontal" Name="StatsPanelHeader" Background="Transparent" Cursor="SizeAll" Tag="{Binding ElementName=StatsPanel}"
+                    <!-- Panel başlıkları StackPanel değil DockPanel: yatay StackPanel başlığa sonsuz genişlik verdiği için
+                         TextTrimming hiç devreye girmiyor, uzun başlık (ör. "İSTATİSTİKLER", Almanca metinler) sağdaki
+                         düğmelerin altına taşıyordu. DockPanel'de başlık kalan alanı doldurur ve gerekirse "…" ile kısalır. -->
+                    <DockPanel LastChildFill="True" Name="StatsPanelHeader" Background="Transparent" Cursor="SizeAll" Tag="{Binding ElementName=StatsPanel}"
                                 MouseLeftButtonDown="PanelHeader_MouseLeftButtonDown" MouseMove="PanelHeader_MouseMove" MouseLeftButtonUp="PanelHeader_MouseLeftButtonUp">
                         <TextBlock Text="⠿" FontSize="10" Foreground="#3DA9FC" Margin="0,0,8,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
                         <TextBlock Text="{loc:Translate ui.istatistikler}" FontFamily="{StaticResource PixelFont}" FontSize="8" FontWeight="Bold" Foreground="#FFFFFF" TextTrimming="CharacterEllipsis" IsHitTestVisible="False"/>
-                    </StackPanel>
+                    </DockPanel>
                     <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
                         <Button Name="StatsCollapseBtn" Content="⏷" Click="PanelBody_Toggle" Tag="{Binding ElementName=StatsPanelBody}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.kucult_buyut}" AutomationProperties.Name="{loc:Translate ui.kucult_buyut}"/>
                         <Button Name="StatsScaleDownBtn" Content="➖" Click="PanelScaleDown_Click" Tag="{Binding ElementName=StatsPanel}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.paneli_kucult}" AutomationProperties.Name="{loc:Translate ui.paneli_kucult}"/>
@@ -250,9 +253,12 @@
                 <ItemsControl Name="AchievementsListControl">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
-                            <TextBlock Text="{Binding Label}" FontSize="8" Margin="0,2">
+                            <TextBlock Text="{Binding Label}" FontSize="8" Margin="0,2" TextWrapping="Wrap">
                                 <TextBlock.Style>
-                                    <Style TargetType="TextBlock">
+                                    <!-- BasedOn: yerel stil örtük TextBlock stilini (piksel font satır yüksekliği,
+                                         bkz. PixelLineHeightConverter) EZİYORDU; uzun başarım adı iki satıra
+                                         kayınca satırlar üst üste biniyordu. -->
+                                    <Style TargetType="TextBlock" BasedOn="{StaticResource GuaranteedLineHeight}">
                                         <Setter Property="Foreground" Value="#95E1D3"/>
                                         <Setter Property="Opacity" Value="1"/>
                                         <Style.Triggers>
@@ -312,11 +318,11 @@
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <StackPanel Orientation="Horizontal" Name="VehicleInfoPanelHeader" Background="Transparent" Cursor="SizeAll" Tag="{Binding ElementName=VehicleInfoPanel}"
+                    <DockPanel LastChildFill="True" Name="VehicleInfoPanelHeader" Background="Transparent" Cursor="SizeAll" Tag="{Binding ElementName=VehicleInfoPanel}"
                                 MouseLeftButtonDown="PanelHeader_MouseLeftButtonDown" MouseMove="PanelHeader_MouseMove" MouseLeftButtonUp="PanelHeader_MouseLeftButtonUp">
                         <TextBlock Text="⠿" FontSize="10" Foreground="#3DA9FC" Margin="0,0,8,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
                         <TextBlock Text="{loc:Translate ui.secili_arac}" FontFamily="{StaticResource PixelFont}" FontSize="8" FontWeight="Bold" Foreground="#FFFFFF" TextTrimming="CharacterEllipsis" IsHitTestVisible="False"/>
-                    </StackPanel>
+                    </DockPanel>
                     <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
                         <Button Name="VehicleInfoCollapseBtn" Content="⏷" Click="PanelBody_Toggle" Tag="{Binding ElementName=VehicleInfoPanelBody}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.kucult_buyut}" AutomationProperties.Name="{loc:Translate ui.kucult_buyut}"/>
                         <Button Name="VehicleInfoScaleDownBtn" Content="➖" Click="PanelScaleDown_Click" Tag="{Binding ElementName=VehicleInfoPanel}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.paneli_kucult}" AutomationProperties.Name="{loc:Translate ui.paneli_kucult}"/>
@@ -472,11 +478,11 @@
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <StackPanel Orientation="Horizontal" Name="GearPanelHeader" Background="Transparent" Cursor="SizeAll" Tag="{Binding ElementName=GearPanel}"
+                    <DockPanel LastChildFill="True" Name="GearPanelHeader" Background="Transparent" Cursor="SizeAll" Tag="{Binding ElementName=GearPanel}"
                                 MouseLeftButtonDown="PanelHeader_MouseLeftButtonDown" MouseMove="PanelHeader_MouseMove" MouseLeftButtonUp="PanelHeader_MouseLeftButtonUp">
                         <TextBlock Text="⠿" FontSize="10" Foreground="#3DA9FC" Margin="0,0,6,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
                         <TextBlock Text="{loc:Translate ui.vites}" FontFamily="{StaticResource PixelFont}" FontSize="8" FontWeight="Bold" Foreground="#FFFFFF" TextTrimming="CharacterEllipsis" IsHitTestVisible="False"/>
-                    </StackPanel>
+                    </DockPanel>
                     <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
                         <Button Name="GearCollapseBtn" Content="⏷" Click="PanelBody_Toggle" Tag="{Binding ElementName=GearPanelBody}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.kucult_buyut}" AutomationProperties.Name="{loc:Translate ui.kucult_buyut}"/>
                         <Button Name="GearScaleDownBtn" Content="➖" Click="PanelScaleDown_Click" Tag="{Binding ElementName=GearPanel}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.paneli_kucult}" AutomationProperties.Name="{loc:Translate ui.paneli_kucult}"/>
@@ -602,11 +608,11 @@
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <StackPanel Orientation="Horizontal" Name="ItemShopPanelHeader" Background="Transparent" Cursor="SizeAll" Tag="{Binding ElementName=ItemShopPanel}"
+                    <DockPanel LastChildFill="True" Name="ItemShopPanelHeader" Background="Transparent" Cursor="SizeAll" Tag="{Binding ElementName=ItemShopPanel}"
                                 MouseLeftButtonDown="PanelHeader_MouseLeftButtonDown" MouseMove="PanelHeader_MouseMove" MouseLeftButtonUp="PanelHeader_MouseLeftButtonUp">
                         <TextBlock Text="⠿" FontSize="10" Foreground="#3DA9FC" Margin="0,0,8,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
                         <TextBlock Text="{loc:Translate ui.esyalar_2}" FontFamily="{StaticResource PixelFont}" FontSize="8" FontWeight="Bold" Foreground="#FFFFFF" TextTrimming="CharacterEllipsis" IsHitTestVisible="False"/>
-                    </StackPanel>
+                    </DockPanel>
                     <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
                         <Button Name="ItemShopCollapseBtn" Content="⏵" Click="PanelBody_Toggle" Tag="{Binding ElementName=ItemShopPanelBody}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.kucult_buyut}" AutomationProperties.Name="{loc:Translate ui.kucult_buyut}"/>
                         <Button Name="ItemShopScaleDownBtn" Content="➖" Click="PanelScaleDown_Click" Tag="{Binding ElementName=ItemShopPanel}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.paneli_kucult}" AutomationProperties.Name="{loc:Translate ui.paneli_kucult}"/>
@@ -652,11 +658,11 @@
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <StackPanel Orientation="Horizontal" Name="QuickActionsPanelHeader" Background="Transparent" Cursor="SizeAll" Tag="{Binding ElementName=QuickActionsPanel}"
+                    <DockPanel LastChildFill="True" Name="QuickActionsPanelHeader" Background="Transparent" Cursor="SizeAll" Tag="{Binding ElementName=QuickActionsPanel}"
                                 MouseLeftButtonDown="PanelHeader_MouseLeftButtonDown" MouseMove="PanelHeader_MouseMove" MouseLeftButtonUp="PanelHeader_MouseLeftButtonUp">
                         <TextBlock Text="⠿" FontSize="10" Foreground="#3DA9FC" Margin="0,0,8,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
                         <TextBlock Text="{loc:Translate ui.hizli_islemler_2}" FontFamily="{StaticResource PixelFont}" FontSize="8" FontWeight="Bold" Foreground="#FFFFFF" TextTrimming="CharacterEllipsis" IsHitTestVisible="False"/>
-                    </StackPanel>
+                    </DockPanel>
                     <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
                         <Button Name="QuickActionsCollapseBtn" Content="⏵" Click="PanelBody_Toggle" Tag="{Binding ElementName=QuickActionsScrollViewer}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.kucult_buyut}" AutomationProperties.Name="{loc:Translate ui.kucult_buyut}"/>
                         <Button Name="QuickActionsScaleDownBtn" Content="➖" Click="PanelScaleDown_Click" Tag="{Binding ElementName=QuickActionsPanel}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.paneli_kucult}" AutomationProperties.Name="{loc:Translate ui.paneli_kucult}"/>
@@ -797,11 +803,11 @@
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <StackPanel Orientation="Horizontal" Name="ExpansionsPanelHeader" Background="Transparent" Cursor="SizeAll" Tag="{Binding ElementName=ExpansionsPanel}"
+                    <DockPanel LastChildFill="True" Name="ExpansionsPanelHeader" Background="Transparent" Cursor="SizeAll" Tag="{Binding ElementName=ExpansionsPanel}"
                                 MouseLeftButtonDown="PanelHeader_MouseLeftButtonDown" MouseMove="PanelHeader_MouseMove" MouseLeftButtonUp="PanelHeader_MouseLeftButtonUp">
                         <TextBlock Text="⠿" FontSize="10" Foreground="#3DA9FC" Margin="0,0,8,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
                         <TextBlock Text="{loc:Translate ui.eklentiler}" FontFamily="{StaticResource PixelFont}" FontSize="8" FontWeight="Bold" Foreground="#FFFFFF" TextTrimming="CharacterEllipsis" IsHitTestVisible="False"/>
-                    </StackPanel>
+                    </DockPanel>
                     <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
                         <Button Name="ExpansionsScaleDownBtn" Content="➖" Click="PanelScaleDown_Click" Tag="{Binding ElementName=ExpansionsPanel}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.paneli_kucult}" AutomationProperties.Name="{loc:Translate ui.paneli_kucult}"/>
                         <Button Name="ExpansionsScaleUpBtn" Content="➕" Click="PanelScaleUp_Click" Tag="{Binding ElementName=ExpansionsPanel}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.paneli_buyut}" AutomationProperties.Name="{loc:Translate ui.paneli_buyut}"/>
@@ -896,11 +902,11 @@
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <StackPanel Orientation="Horizontal" Name="MasterPanelHeader" Background="Transparent" Cursor="SizeAll" Tag="{Binding ElementName=MasterPanel}"
+                    <DockPanel LastChildFill="True" Name="MasterPanelHeader" Background="Transparent" Cursor="SizeAll" Tag="{Binding ElementName=MasterPanel}"
                                 MouseLeftButtonDown="PanelHeader_MouseLeftButtonDown" MouseMove="PanelHeader_MouseMove" MouseLeftButtonUp="PanelHeader_MouseLeftButtonUp">
                         <TextBlock Text="⠿" FontSize="10" Foreground="#3DA9FC" Margin="0,0,8,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
                         <TextBlock Text="{loc:Translate ui.paneller}" FontFamily="{StaticResource PixelFont}" FontSize="8" FontWeight="Bold" Foreground="#FFFFFF" TextTrimming="CharacterEllipsis" IsHitTestVisible="False"/>
-                    </StackPanel>
+                    </DockPanel>
                     <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
                         <Button Name="MasterScaleDownBtn" Content="➖" Click="PanelScaleDown_Click" Tag="{Binding ElementName=MasterPanel}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.paneli_kucult}" AutomationProperties.Name="{loc:Translate ui.paneli_kucult}"/>
                         <Button Name="MasterScaleUpBtn" Content="➕" Click="PanelScaleUp_Click" Tag="{Binding ElementName=MasterPanel}" Style="{StaticResource IconButton}" Width="20" Height="20" Margin="1,0" FontSize="10" ToolTip="{loc:Translate ui.paneli_buyut}" AutomationProperties.Name="{loc:Translate ui.paneli_buyut}"/>

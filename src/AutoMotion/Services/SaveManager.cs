@@ -439,20 +439,7 @@ namespace AutoMotion.Services
         /// Böylece yazma sırasında elektrik kesintisi/zorla kapanma olursa hedef dosya ya eski
         /// (tutarlı) halinde kalır ya da yeni (tam) haline geçer - asla yarım kalmaz.</summary>
         private static void WriteAllTextAtomic(string path, string contents)
-        {
-            string tmp = path + ".tmp";
-            File.WriteAllText(tmp, contents);
-
-            if (File.Exists(path))
-            {
-                // File.Replace NTFS üzerinde atomik takas yapar.
-                File.Replace(tmp, path, destinationBackupFileName: null);
-            }
-            else
-            {
-                File.Move(tmp, path);
-            }
-        }
+            => Utilities.AtomicFile.WriteAllText(path, contents); // diske zorlanmış (fsync) takas - bkz. AtomicFile
 
         private static void TryDeleteFile(string path)
         {

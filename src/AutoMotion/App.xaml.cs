@@ -258,7 +258,7 @@ public partial class App : Application
         RotateLogIfTooLarge(logPath);
 
         string suffix = suppressedCount > 0
-            ? $" (önceki {suppressedCount} tekrar bastırıldı)"
+            ? $" (önceki {suppressedCount} tekrar bastırıldı)" // loc:ignore - yalnızca error.log içeriği, kullanıcıya gösterilmez
             : "";
         File.AppendAllText(logPath, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}]{suffix} {ex}\n\n");
     }
@@ -288,13 +288,12 @@ public partial class App : Application
 
             Current?.Dispatcher.BeginInvoke(new Action(() =>
             {
+                // Loc, OnStartup'ın en başında yükleniyor; bu uyarı yalnızca TEKRARLAYAN hatada
+                // çıktığından o noktada çeviriler her zaman hazır.
                 MessageBox.Show(
-                    "AutoMotion tekrarlayan bir hatayla karşılaştı ve bazı görsel efektler düzgün " +
-                    "çalışmıyor olabilir.\n\n" +
-                    $"Hata: {ex.GetType().Name} - {ex.Message}\n\n" +
-                    $"Ayrıntılar: {Path.Combine(logDir, "error.log")}\n\n" +
-                    "Uygulamayı yeniden başlatmanız önerilir.",
-                    "AutoMotion - Hata",
+                    Services.Loc.T("dlg.repeated_error_body",
+                        ex.GetType().Name, ex.Message, Path.Combine(logDir, "error.log")),
+                    Services.Loc.T("dlg.repeated_error_title"),
                     MessageBoxButton.OK,
                     MessageBoxImage.Warning);
             }));
