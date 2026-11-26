@@ -614,6 +614,15 @@ namespace AutoMotion.Models
             { "wagon", ("Tarım Römorku 2", "🌾") }
         };
 
+        /// <summary>Dorsenin arayüzde gösterilecek (yerelleştirilmiş) adı. Katalogdaki Türkçe ad
+        /// sözlükte karşılığı yoksa kullanılan yedektir.</summary>
+        public static string TrailerLabel(string trailerType)
+        {
+            if (string.IsNullOrEmpty(trailerType)) return "";
+            string fallback = TrailerCatalog.TryGetValue(trailerType, out var info) ? info.label : trailerType;
+            return Services.Loc.TOrDefault($"trailer.{trailerType}", fallback);
+        }
+
         // Yan Saklanma ve Kargo/Hedef Özellikleri (VPet ve Görevler için)
         public bool IsSideHidden { get; set; }
         public string HiddenDirection { get; set; } = "";
@@ -656,7 +665,9 @@ namespace AutoMotion.Models
             {
                 var visual = VehicleVisuals.Get(Type, Brand);
                 if (visual != null) return visual.Label;
-                return TypeLabelsTr.TryGetValue(Type, out var label) ? label : Type;
+                return TypeLabelsTr.TryGetValue(Type, out var label)
+                    ? Services.Loc.TOrDefault($"vehicle.type.{Type}", label)
+                    : Type;
             }
         }
 

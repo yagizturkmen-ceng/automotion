@@ -76,15 +76,21 @@ public class ExpansionTests
     [Fact]
     public void Expansion_StatusIconAndLabel_ReflectEnabledState()
     {
+        // Etiket artık yerelleştirilmiş (eskiden sabit "Açık"/"Kapalı" idi - İngilizce arayüzde
+        // eklenti listesi Türkçe kalıyordu). Testler arası paylaşılan Loc durumuna bağımlı
+        // olmamak için beklenen değer de aynı anahtardan okunuyor; ayrıca iki durumun FARKLI
+        // metin ürettiği doğrulanıyor.
+        Assert.NotEqual(AutoMotion.Services.Loc.T("ui.state_on"), AutoMotion.Services.Loc.T("ui.state_off"));
+
         var core = new GameCore();
         var expansion = new EconomyExpansion();
 
         Assert.Equal("⚪", expansion.StatusIcon);
-        Assert.Equal("Kapalı", expansion.StatusLabel);
+        Assert.Equal(AutoMotion.Services.Loc.T("ui.state_off"), expansion.StatusLabel);
 
         expansion.Enable(core);
 
         Assert.Equal("🟢", expansion.StatusIcon);
-        Assert.Equal("Açık", expansion.StatusLabel);
+        Assert.Equal(AutoMotion.Services.Loc.T("ui.state_on"), expansion.StatusLabel);
     }
 }

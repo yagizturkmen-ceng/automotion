@@ -16,17 +16,8 @@ namespace AutoMotion.Tests;
 /// </summary>
 public class PublishAndEnduranceTests
 {
-    private static string RepoRoot
-    {
-        get
-        {
-            var dir = new DirectoryInfo(AppContext.BaseDirectory);
-            while (dir != null && !Directory.Exists(Path.Combine(dir.FullName, "AutoMotion", "Assets", "Lang")))
-                dir = dir.Parent;
-            Assert.NotNull(dir);
-            return dir!.FullName;
-        }
-    }
+    // Uygulama klasörünün üstü: Path.Combine(RepoRoot, "AutoMotion", ...) iki düzende de doğru yere çıkar.
+    private static string RepoRoot => Directory.GetParent(TestPaths.AppDir)!.FullName;
 
     // ─────────────────────────────────────────────────────────── 2.5 · yayın paketi
 
@@ -163,5 +154,42 @@ public class PublishAndEnduranceTests
         Assert.Equal(unlocked.Distinct().Count(), unlocked.Count);
         Assert.True(unlocked.Count <= GameCore.AchievementCatalog.Count,
             $"kazanılan başarım sayısı katalogdan fazla: {unlocked.Count}");
+    }
+
+    /// <summary>
+    /// Kullanılan her NuGet paketi ve gömülü yazı tipi, yayın paketiyle birlikte giden
+    /// THIRD_PARTY_NOTICES.txt içinde lisansıyla anılmalı. MIT ve SIL OFL, lisans metninin bileşenle
+    /// birlikte dağıtılmasını şart koşar; yeni bir paket eklenip bildirim unutulursa bu test kırılır.
+    /// </summary>
+    [Fact]
+    public void ThirdPartyNotices_CoverEveryPackage_AndShipWithTheApp()
+    {
+        string noticesPath = Path.Combine(RepoRoot, "AutoMotion", "THIRD_PARTY_NOTICES.txt");
+        Assert.True(File.Exists(noticesPath), "THIRD_PARTY_NOTICES.txt bulunamadı.");
+        string notices = File.ReadAllText(noticesPath);
+
+        var packages = Regex.Matches(Csproj, @"<PackageReference\s+Include=""([^""]+)""")
+            .Select(m => m.Groups[1].Value)
+            .ToList();
+        Assert.NotEmpty(packages);
+
+        foreach (var package in packages)
+            Assert.True(notices.Contains(package, StringComparison.OrdinalIgnoreCase),
+                package + " için lisans bildirimi yok.");
+
+        Assert.Contains("SIL Open Font License", notices);   // Press Start 2P
+        Assert.Matches(@"<Content\s+Include=""THIRD_PARTY_NOTICES\.txt"">", Csproj);
+    }
+
+    /// <summary>
+    /// Gerçek App ID alındığında İKİ yer birlikte güncellenmeli: steam_appid.txt (geliştirme) ve
+    /// SteamService.AppId (çalışma zamanı). Biri unutulursa geliştirme sürümü başka bir uygulama
+    /// olarak açılır, başarımlar yanlış uygulamaya yazılır. steam\yayinla.ps1 de aynı kontrolü yapar.
+    /// </summary>
+    [Fact]
+    public void SteamAppId_IsTheSame_InSteamAppIdTxt_AndSteamService()
+    {
+        string txt = File.ReadAllText(Path.Combine(RepoRoot, "AutoMotion", "steam_appid.txt")).Trim();
+        Assert.Equal(txt, AutoMotion.Services.SteamService.AppId.ToString());
     }
 }

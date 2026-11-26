@@ -22,7 +22,17 @@ namespace AutoMotion.Models
     {
         public string Type { get; init; } = "";
         public string Brand { get; init; } = "";
-        public string Label { get; init; } = "";
+        /// <summary>Yerleşik varyantların çeviri anahtarı (ör. "vehicle.model.car.sedan"). Kullanıcının
+        /// içe aktardığı özel görsellerde boştur - onların adı kullanıcının kendi yazdığı metindir.</summary>
+        public string LabelKey { get; init; } = "";
+
+        private readonly string label = "";
+        public string Label
+        {
+            get => string.IsNullOrEmpty(LabelKey) ? label : Services.Loc.TOrDefault(LabelKey, label);
+            init => label = value ?? "";
+        }
+
         public string ImagePath { get; init; } = "";
         public double AspectRatio { get; init; } // genişlik / yükseklik
         public WheelSpec[] Wheels { get; init; } = System.Array.Empty<WheelSpec>();
@@ -137,6 +147,7 @@ namespace AutoMotion.Models
                 Type = type,
                 Brand = brand,
                 Label = label,
+                LabelKey = $"vehicle.model.{type}.{brand}",
                 ImagePath = $"/Assets/Vehicles/{type}/{type}_{brand}.png",
                 AspectRatio = aspectRatio,
                 Wheels = new[] { wheel1, wheel2 }

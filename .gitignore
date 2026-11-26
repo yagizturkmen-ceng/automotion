@@ -25,3 +25,11 @@ desktop.ini
 
 # Local scratch
 scratch/
+
+# Steam yükleme (steam/yayinla.ps1) çıktıları
+steam/output/
+steam/app_build.vdf
+steam/depot_build.vdf
+
+# Yerel doğrulama betiği çıktıları
+_verify/

@@ -260,13 +260,8 @@ public class RetainedSceneTests
     [Fact]
     public void EveryScenePool_IsUsedExactlyOnceInTheRenderCode()
     {
-        var dir = new System.IO.DirectoryInfo(AppContext.BaseDirectory);
-        while (dir != null && !System.IO.Directory.Exists(System.IO.Path.Combine(dir.FullName, "AutoMotion", "Assets", "Lang")))
-            dir = dir.Parent;
-        Assert.NotNull(dir);
-
         string source = System.IO.File.ReadAllText(
-            System.IO.Path.Combine(dir!.FullName, "AutoMotion", "MainWindow.Rendering.cs"));
+            System.IO.Path.Combine(TestPaths.AppDir, "MainWindow.Rendering.cs"));
 
         var offenders = Enum.GetNames<ScenePool>()
             .Select(name => (name, count: System.Text.RegularExpressions.Regex

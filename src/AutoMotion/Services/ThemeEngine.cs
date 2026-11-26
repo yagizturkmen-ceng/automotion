@@ -14,22 +14,6 @@ namespace AutoMotion.Services
         public int ThemeCount => 11;
         private static bool IsNightNow => DateTime.Now.Hour >= 20 || DateTime.Now.Hour < 6;
 
-        public string ThemeName => currentTheme switch
-        {
-            0 => "Şeffaf (Masaüstü)",
-            1 => "Açık",
-            2 => "Koyu",
-            3 => "Gün Batımı",
-            4 => "Okyanus",
-            5 => "Cam (Glassmorphism)",
-            6 => "Tam Şeffaf (Çizgisiz)",
-            7 => IsNightNow ? "Otomatik (şu an: Gece)" : "Otomatik (şu an: Gündüz)",
-            8 => "Yağmurlu / Fırtınalı",
-            9 => "Kış",
-            10 => "Sentetik Gece (Synthwave)",
-            _ => "Şeffaf"
-        };
-
         public Brush GetBackgroundBrush()
         {
             return currentTheme switch

@@ -305,20 +305,7 @@ namespace AutoMotion.Services
         }
 
         private static void WriteAllTextAtomic(string path, string contents)
-        {
-            string tmp = path + ".tmp";
-            File.WriteAllText(tmp, contents);
-
-            if (File.Exists(path))
-            {
-                // File.Replace NTFS üzerinde atomik takas yapar.
-                File.Replace(tmp, path, destinationBackupFileName: null);
-            }
-            else
-            {
-                File.Move(tmp, path);
-            }
-        }
+            => Utilities.AtomicFile.WriteAllText(path, contents); // diske zorlanmış (fsync) takas - bkz. AtomicFile
 
         /// <summary>Bozuk ayar dosyasını silmek yerine kenara alır: kullanıcı düzenini elle
         /// kurtarabilir, biz de üzerine yazmadan temiz varsayılanlarla devam ederiz.</summary>
